@@ -190,7 +190,7 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
                 isError = promoInput.isNotBlank() && promo == null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
         }
-        OutlinedTextField(optionDraft, { optionDraft = it.take(600) }, Modifier.fillMaxWidth(), label = { Text("Varian (opsional)") },
+        OutlinedTextField(optionDraft, { if (it.length <= 600 || it.length < optionDraft.length) optionDraft = it }, Modifier.fillMaxWidth(), label = { Text("Varian (opsional)") },
             placeholder = { Text("Less sugar\nCup besar +5000") }, minLines = 2,
             supportingText = { Text(if (options == null) "Satu varian per baris, nama tidak boleh sama. Tambahan harga: +5000."
                 else "Satu varian per baris. Tulis +5000 untuk tambahan harga.") },
