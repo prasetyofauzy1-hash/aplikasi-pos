@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,6 +30,7 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -80,7 +82,7 @@ internal fun StaticQrisSettings(model: RegisterModel, onEdit: () -> Unit) {
 }
 
 @Composable
-internal fun StaticQrisPayment(name: String) {
+internal fun StaticQrisPayment(name: String, maxSide: Dp, modifier: Modifier = Modifier) {
     val image = storedQrisImage(name)
     if (image == null) {
         if (name.isEmpty()) {
@@ -89,9 +91,8 @@ internal fun StaticQrisPayment(name: String) {
             Text("Jika gambar tidak muncul, ganti gambar QRIS di tab Toko.", color = Muted)
         }
     } else {
-        Surface(color = Color.White, shape = Shape) {
-            QrisImage(image, Modifier.fillMaxWidth().padding(12.dp)
-                .aspectRatio(image.width.toFloat() / image.height), "Kode QRIS toko untuk dipindai")
+        Surface(modifier.widthIn(max = maxSide).fillMaxWidth().aspectRatio(1f), color = Color.White, shape = Shape) {
+            QrisImage(image, Modifier.padding(12.dp), "Kode QRIS toko untuk dipindai")
         }
     }
 }

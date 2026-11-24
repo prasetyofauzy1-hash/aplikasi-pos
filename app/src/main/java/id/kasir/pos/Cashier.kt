@@ -35,6 +35,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -268,8 +269,17 @@ private fun QuantityDialog(product: Product, quantity: Int, onDismiss: () -> Uni
 }
 
 @Composable
-@OptIn(ExperimentalLayoutApi::class)
 internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model: RegisterModel, onPaid: () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().navigationBarsPadding()) {
+        PaymentContent(products, cart, model, (maxHeight - 24.dp).coerceAtLeast(0.dp), onPaid)
+    }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun PaymentContent(
+    products: List<Product>, cart: Map<Long, Int>, model: RegisterModel, maxQrSide: Dp, onPaid: () -> Unit
+) {
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
     val total = cartTotal(products, cart)
@@ -282,7 +292,7 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
         focusManager.clearFocus()
     }
     Column(
-        Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
+        Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("03  /  SELESAIKAN TRANSAKSI", "Pembayaran", "Catat pembayaran yang diterima dari pelanggan.")
@@ -314,7 +324,7 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
                 cash != null -> MetricRow("Kembalian", rupiah(cash - total), true)
             }
         } else {
-            StaticQrisPayment(model.qrisImageName)
+            StaticQrisPayment(model.qrisImageName, maxQrSide, Modifier.align(Alignment.CenterHorizontally))
             EmptyPanel("QRIS dicatat manual", "Minta pelanggan memasukkan total yang tertera. Pastikan dana sudah diterima sebelum menyimpan.")
         }
         ErrorText(model.error)
