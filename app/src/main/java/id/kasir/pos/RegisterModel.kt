@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.SystemClock
+import android.provider.Settings
 import android.util.Base64
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,9 +68,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         runAction("PIN tidak dapat diperiksa.") {
             val valid = withContext(Dispatchers.IO) {
                 if (pinConfigured) {
-                    val salt = Base64.decode(preferences.getString("pinSalt", "").orEmpty(), Base64.NO_WRAP)
-                    val saved = Base64.decode(preferences.getString("pinHash", "").orEmpty(), Base64.NO_WRAP)
-                    MessageDigest.isEqual(saved, derivePin(pin, salt))
+                    verifyOwnerPin(pin)
                 } else {
                     val salt = ByteArray(16).also(SecureRandom()::nextBytes)
                     if (!preferences.edit()
@@ -92,6 +92,36 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         receipt = null
         clearError()
         unlocked = false
+    }
+
+    private fun verifyOwnerPin(pin: String): Boolean {
+        val boot = Settings.Global.getInt(getApplication<Application>().contentResolver, Settings.Global.BOOT_COUNT, -1)
+        val attempts = PinAttempts(
+            failures = preferences.getInt("pinFailures", 0),
+            untilWall = preferences.getLong("pinUntilWall", 0),
+            untilElapsed = preferences.getLong("pinUntilElapsed", 0),
+            boot = preferences.getInt("pinBoot", -1)
+        )
+        fun requireAvailable(state: PinAttempts) {
+            val remaining = state.remainingMillis(System.currentTimeMillis(), SystemClock.elapsedRealtime(), boot)
+            if (remaining > 0) {
+                throw SaleInputException("Terlalu banyak percobaan PIN. Coba lagi dalam ${(remaining + 999) / 1000} detik.")
+            }
+        }
+
+        requireAvailable(attempts)
+        val salt = Base64.decode(preferences.getString("pinSalt", "").orEmpty(), Base64.NO_WRAP)
+        val saved = Base64.decode(preferences.getString("pinHash", "").orEmpty(), Base64.NO_WRAP)
+        val valid = MessageDigest.isEqual(saved, derivePin(pin, salt))
+        val next = if (valid) PinAttempts() else attempts.failed(System.currentTimeMillis(), SystemClock.elapsedRealtime(), boot)
+        if (!preferences.edit()
+                .putInt("pinFailures", next.failures)
+                .putLong("pinUntilWall", next.untilWall)
+                .putLong("pinUntilElapsed", next.untilElapsed)
+                .putInt("pinBoot", next.boot)
+                .commit()) throw IOException()
+        requireAvailable(next)
+        return valid
     }
 
     private fun derivePin(pin: String, salt: ByteArray): ByteArray {
