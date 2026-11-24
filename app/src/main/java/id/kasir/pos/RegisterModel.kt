@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.util.Base64
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -53,7 +54,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     internal var profitUnlocked by mutableStateOf(false)
         private set
-    private var profitAccessRequest = 0L
+    internal var profitAccessGeneration by mutableLongStateOf(0L)
+        private set
     var firstUnlock by mutableStateOf(false)
         private set
     var initialOwnerEmailOffer by mutableStateOf(false)
@@ -272,15 +274,15 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     internal fun unlockProfit(pin: String) {
         if (!unlocked || profitUnlocked) return
-        val request = profitAccessRequest
+        val request = profitAccessGeneration
         runAction("PIN tidak dapat diperiksa.") {
             withContext(Dispatchers.IO) { requireOwnerPin(pin) }
-            if (unlocked && request == profitAccessRequest) profitUnlocked = true
+            if (unlocked && request == profitAccessGeneration) profitUnlocked = true
         }
     }
 
     internal fun lockProfit() {
-        profitAccessRequest++
+        profitAccessGeneration++
         profitUnlocked = false
     }
 

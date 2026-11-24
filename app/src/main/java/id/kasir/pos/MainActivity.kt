@@ -84,9 +84,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onStop() {
+    override fun onPause() {
         model.lockProfit()
-        super.onStop()
+        super.onPause()
     }
 }
 

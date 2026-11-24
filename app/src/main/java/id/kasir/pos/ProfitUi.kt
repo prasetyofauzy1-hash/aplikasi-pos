@@ -30,7 +30,7 @@ private enum class ProfitPage(val label: String) {
 
 @Composable
 internal fun ProfitGate(model: RegisterModel) {
-    var pin by remember { mutableStateOf("") }
+    var pin by remember(model.profitAccessGeneration) { mutableStateOf("") }
     val focus = LocalFocusManager.current
     val canSubmit = pin.length == 6 && !model.busy
     val submit: () -> Unit = {
