@@ -207,6 +207,7 @@ private fun ReportDateControls(date: Long, today: Long, onSelect: (Long) -> Unit
             CompositionLocalProvider(LocalConfiguration provides localized) {
                 DatePicker(
                     state = picker,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                     title = { Text("Pilih tanggal", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) },
                     headline = {
                         Text(
