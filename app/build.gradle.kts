@@ -1,9 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
 }
+
+val localProperties = Properties().apply {
+    providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+        .asText.orNull?.reader()?.use { load(it) }
+}
+val firebaseApiKey = localProperties.getProperty("FIREBASE_API_KEY", "").trim()
+    .replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "id.kasir.pos"
@@ -14,8 +23,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
     }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -38,4 +51,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.0")
     ksp("androidx.room:room-compiler:2.7.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

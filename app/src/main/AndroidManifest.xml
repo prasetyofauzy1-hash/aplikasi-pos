@@ -1,10 +1,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@drawable/ic_kasir"
         android:label="@string/app_name"
         android:theme="@style/Theme.KasirRapi">
+        <provider
+            android:name=".SalesExportFileProvider"
+            android:authorities="${applicationId}.sales-export"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/sales_export_paths" />
+        </provider>
         <activity
             android:name=".MainActivity"
             android:exported="true"

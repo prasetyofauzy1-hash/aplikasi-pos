@@ -5,17 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -29,8 +30,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +43,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.TimeZone
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun Modifier.verticalContent() =
@@ -277,6 +282,7 @@ internal fun HistoryScreen(model: RegisterModel) {
                         }
                     }
                 }
+                SalesExportButton(model)
             }
         }
         item {
@@ -336,7 +342,9 @@ internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -
             Column(Modifier.fillMaxWidth().padding(19.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    StoreLogo(sale.logoName, Modifier.size(54.dp).clip(RoundedCornerShape(15.dp)))
+                    val logoSize = if (sale.logoName.isBlank()) Modifier.size(54.dp)
+                        else Modifier.size(width = 128.dp, height = 88.dp)
+                    StoreLogo(sale.logoName, logoSize)
                     Text(sale.storeName, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     if (sale.storeAddress.isNotBlank()) Text(sale.storeAddress, textAlign = TextAlign.Center, color = Muted)
                     Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -364,16 +372,36 @@ internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -
 }
 
 @Composable
-internal fun SettingsScreen(model: RegisterModel) {
+internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
     val profile = model.profile
     var name by rememberSaveable(profile.name) { mutableStateOf(profile.name) }
     var address by rememberSaveable(profile.address) { mutableStateOf(profile.address) }
     var newLogo by rememberSaveable { mutableStateOf<Uri?>(null) }
     var removeLogo by rememberSaveable { mutableStateOf(false) }
     var saved by rememberSaveable { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) { newLogo = uri; removeLogo = false; saved = false }
+    val context = LocalContext.current
+    val edited = {
+        saved = false
+        model.clearError()
     }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) { newLogo = uri; removeLogo = false; edited() }
+    }
+    val selection = newLogo
+    val preview by key(selection) {
+        produceState<Result<Bitmap>?>(initialValue = null) {
+            if (selection != null) {
+                value = try {
+                    Result.success(withContext(Dispatchers.IO) { decodeStoreLogo(context, selection) })
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+    }
+    val image = remember(preview) { preview?.getOrNull()?.asImageBitmap() }
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -382,11 +410,15 @@ internal fun SettingsScreen(model: RegisterModel) {
         Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
             Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StoreLogo(if (removeLogo) "" else profile.logoName, Modifier.size(48.dp).clip(RoundedCornerShape(13.dp)))
+                val logoModifier = Modifier.size(72.dp)
+                if (image != null) Image(image, "Pratinjau logo toko", logoModifier, contentScale = ContentScale.Fit)
+                else StoreLogo(if (removeLogo || selection != null) "" else profile.logoName, logoModifier)
                 Column(Modifier.weight(1f)) {
                     Text("Logo toko", fontWeight = FontWeight.Bold)
                     Text(when {
-                        newLogo != null -> "Foto dipilih"
+                        image != null -> "Logo belum disimpan"
+                        preview?.isFailure == true -> "Foto tidak dapat dibuka"
+                        selection != null -> "Memuat foto…"
                         removeLogo -> "Logo akan dihapus"
                         profile.logoName.isNotBlank() -> "Logo tersimpan"
                         else -> "Opsional"
@@ -395,26 +427,48 @@ internal fun SettingsScreen(model: RegisterModel) {
                 TextButton(onClick = { picker.launch("image/*") }, enabled = !model.busy) { Text("Pilih foto") }
             }
         }
-        if ((!removeLogo && profile.logoName.isNotBlank()) || newLogo != null) {
-            TextButton(onClick = { newLogo = null; removeLogo = true; saved = false }, enabled = !model.busy) { Text("Hapus logo") }
+        if (selection != null || removeLogo || profile.logoName.isNotBlank()) {
+            TextButton(onClick = {
+                if (selection != null) newLogo = null else removeLogo = !removeLogo
+                edited()
+            }, enabled = !model.busy) {
+                Text(when {
+                    selection != null -> "Batalkan pilihan foto"
+                    removeLogo -> "Urungkan penghapusan logo"
+                    else -> "Hapus logo"
+                })
+            }
         }
-        OutlinedTextField(name, { name = it.take(60); saved = false }, Modifier.fillMaxWidth(), label = { Text("Nama toko") }, singleLine = true)
-        OutlinedTextField(address, { address = it.take(180); saved = false }, Modifier.fillMaxWidth(), label = { Text("Alamat toko (opsional)") }, minLines = 2)
+        OutlinedTextField(name, { name = it.take(60); edited() }, Modifier.fillMaxWidth(), label = { Text("Nama toko") },
+            enabled = !model.busy, singleLine = true)
+        OutlinedTextField(address, { address = it.take(180); edited() }, Modifier.fillMaxWidth(), label = { Text("Alamat toko (opsional)") },
+            enabled = !model.busy, minLines = 2)
         ErrorText(model.error)
         if (saved) Text("Pengaturan tersimpan.", color = Pine, fontWeight = FontWeight.SemiBold)
         Button(
             onClick = {
                 model.saveProfile(name.trim(), address.trim(), newLogo, removeLogo) {
                     saved = true
+                    name = model.profile.name
+                    address = model.profile.address
                     newLogo = null
                     removeLogo = false
                 }
             },
-            enabled = name.isNotBlank() && !model.busy,
+            enabled = name.isNotBlank() && !model.busy && (selection == null || image != null),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text("Simpan profil toko") }
         HorizontalDivider(color = Line)
         EmptyPanel("Akses pemilik", "Satu PIN untuk mengunci akses kasir di perangkat ini.")
+        val email = model.linkedOwnerEmail
+        if (model.emailAvailable || email != null) {
+            if (email != null) {
+                Text("Email pemilik terhubung: ${maskedOwnerEmail(email)}", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+            OutlinedButton(onClick = onLinkOwner, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(if (email == null) "Hubungkan email pemilik" else "Kelola email pemilik")
+            }
+        }
         OutlinedButton(onClick = model::lock, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Kunci aplikasi") }
         Spacer(Modifier.height(8.dp))
     }
