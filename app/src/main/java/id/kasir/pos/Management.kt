@@ -430,10 +430,10 @@ private fun DeleteSaleDialog(sale: Sale, model: RegisterModel, onDismiss: () -> 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${ticket(sale.id)} senilai ${rupiah(sale.total)} akan dihapus dari riwayat dan laporan penjualan.")
-                Text(if (sale.ingredientDeductions == null) {
-                    "Catatan pemakaian bahan tidak tersedia untuk transaksi lama ini. Sesuaikan stok secara manual jika diperlukan."
+                Text(if (sale.ingredientDeductions == null && sale.productDeductions == null) {
+                    "Catatan stok tidak tersedia untuk transaksi lama ini. Sesuaikan stok secara manual jika diperlukan."
                 } else {
-                    "Stok bahan yang terpakai akan dikembalikan. Penghapusan tidak dapat dibatalkan."
+                    "Stok akan dikembalikan untuk bahan dan produk yang masih tersedia. Penghapusan tidak dapat dibatalkan."
                 })
                 Text("Masukkan PIN pemilik untuk mengonfirmasi.")
                 PinInput(pin, "PIN pemilik", !model.busy, model.error != null, ImeAction.Done, KeyboardActions()) {

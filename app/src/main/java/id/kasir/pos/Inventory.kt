@@ -131,23 +131,27 @@ internal fun stockCountLines(ingredients: List<Ingredient>, counted: Map<Long, I
     }.sortedBy { it.ingredientName.lowercase() }
 }
 
-internal fun encodeIngredientDeductions(deductions: Map<Long, Int>): String =
+internal fun productStockDeductions(menu: List<MenuItem>, cart: Map<Long, Int>): Map<Long, Int> =
+    menu.filter { it.recipe.isEmpty() }.associate { it.product.id to cart.getValue(it.product.id) }
+
+internal fun encodeStockDeductions(deductions: Map<Long, Int>): String =
     JSONObject().apply {
         for ((id, quantity) in deductions) put(id.toString(), quantity)
     }.toString()
 
-internal suspend fun restoreSaleIngredients(
+internal suspend fun restoreStockDeductions(
     snapshot: String?,
-    ingredientExists: suspend (ingredientId: Long) -> Boolean,
-    restock: suspend (ingredientId: Long, quantity: Int) -> Int
+    stockName: String,
+    exists: suspend (id: Long) -> Boolean,
+    restock: suspend (id: Long, quantity: Int) -> Int
 ) {
     if (snapshot == null) return
     val deductions = JSONObject(snapshot)
     for (key in deductions.keys()) {
-        val ingredientId = key.toLong()
+        val id = key.toLong()
         val quantity = deductions.getInt(key)
-        if (quantity !in 1..MAX_INGREDIENT_STOCK || (restock(ingredientId, quantity) != 1 && ingredientExists(ingredientId))) {
-            throw SaleInputException("Stok bahan tidak dapat dikembalikan. Periksa apakah stok melebihi batas.")
+        if (quantity <= 0 || (restock(id, quantity) != 1 && exists(id))) {
+            throw SaleInputException("Stok $stockName tidak dapat dikembalikan. Periksa apakah stok melebihi batas.")
         }
     }
 }
