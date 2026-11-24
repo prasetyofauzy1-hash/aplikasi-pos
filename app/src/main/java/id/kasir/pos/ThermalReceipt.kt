@@ -36,6 +36,7 @@ internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper): ByteArray = 
     alignLeft()
     line(dateLabel(sale.time).replace(" • ", " - "))
     if (sale.id > 0) line(ticket(sale.id))
+    sale.cashierLabel?.let { line(it) }
     divider()
     receipt.lines.forEach { item ->
         line(item.productName)

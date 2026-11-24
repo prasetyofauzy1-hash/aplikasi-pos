@@ -50,6 +50,14 @@ class ThermalReceiptTest {
         assertFalse(lines.any { it.startsWith("Tunai") || it.startsWith("Kembalian") || it.startsWith("TRX-") })
     }
 
+    @Test fun includesCashierSnapshotOnTextAndPrintedReceiptsButNotLegacyReceipts() {
+        val withCashier = receipt.copy(sale = receipt.sale.copy(cashierName = "Dewi"))
+        assertTrue(withCashier.asText().lines().contains("Kasir: Dewi"))
+        assertTrue(printedLines(withCashier, ThermalPaper.MM58).contains("Kasir: Dewi"))
+        assertFalse(receipt.asText().contains("Kasir:"))
+        assertFalse(printedLines(receipt, ThermalPaper.MM58).any { it.startsWith("Kasir:") })
+    }
+
     @Test fun transliteratesCommonSymbolsBeforeReplacingUnsupportedCharacters() {
         val styled = receipt.copy(
             sale = receipt.sale.copy(storeName = "Toko ‘Café’"),

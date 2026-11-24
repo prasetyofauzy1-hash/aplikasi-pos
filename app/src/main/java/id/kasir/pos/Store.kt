@@ -38,6 +38,11 @@ data class Product(
 )])
 data class CartItem(@PrimaryKey val productId: Long, val quantity: Int)
 
+const val OWNER_CASHIER_ID = 1L
+
+@Entity
+data class CashierProfile(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String)
+
 @Entity
 data class Sale(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -47,8 +52,11 @@ data class Sale(
     val method: String,
     val storeName: String,
     val storeAddress: String,
-    val logoName: String
-)
+    val logoName: String,
+    val cashierName: String? = null
+) {
+    val cashierLabel: String? get() = cashierName?.let { "Kasir: $it" }
+}
 
 @Entity(
     foreignKeys = [ForeignKey(entity = Sale::class, parentColumns = ["id"], childColumns = ["saleId"], onDelete = ForeignKey.CASCADE)],
@@ -67,6 +75,11 @@ data class Receipt(@Embedded val sale: Sale, @Relation(parentColumn = "id", enti
 
 @Dao
 interface PosDao {
+    @Query("SELECT * FROM CashierProfile ORDER BY id") fun cashiers(): Flow<List<CashierProfile>>
+    @Query("SELECT * FROM CashierProfile WHERE id = :id") suspend fun cashier(id: Long): CashierProfile?
+    @Insert suspend fun addCashier(cashier: CashierProfile)
+    @Update suspend fun updateCashier(cashier: CashierProfile)
+    @Query("DELETE FROM CashierProfile WHERE id = :id") suspend fun deleteCashier(id: Long)
     @Transaction @Query("SELECT * FROM Product ORDER BY name COLLATE NOCASE") fun menu(): Flow<List<MenuItem>>
     @Transaction @Query("SELECT * FROM Product WHERE id IN (:ids)") suspend fun menuById(ids: Set<Long>): List<MenuItem>
     @Insert suspend fun add(product: Product): Long
@@ -107,11 +120,26 @@ interface PosDao {
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
-@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class], version = 4)
+@Database(
+    entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class, CashierProfile::class],
+    version = 5
+)
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private fun addOwnerCashier(db: SupportSQLiteDatabase) {
+            db.execSQL("INSERT INTO CashierProfile (id, name) VALUES (?, ?)", arrayOf<Any>(OWNER_CASHIER_ID, "Pemilik"))
+        }
+
+        private val addCashierProfiles = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE CashierProfile (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL)")
+                db.execSQL("ALTER TABLE Sale ADD COLUMN cashierName TEXT")
+                addOwnerCashier(db)
+            }
+        }
+
         private val addSaleLineProductId = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE SaleLine ADD COLUMN productId INTEGER")
@@ -137,9 +165,10 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients, addSaleLineProductId)
+            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
+                    addOwnerCashier(db)
                     listOf(
                         Product(1, "Berry Go", "Jus", 20000, 0),
                         Product(2, "Pisang Susu", "Smoothie", 18000, 0),
@@ -194,7 +223,9 @@ fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Pa
 class Register(private val db: PosDatabase) {
     private val dao = db.dao()
 
-    suspend fun sell(cart: Map<Long, Int>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile): Receipt =
+    suspend fun sell(
+        cart: Map<Long, Int>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile, cashierId: Long
+    ): Receipt =
         db.withTransaction {
             if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
                 throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
@@ -203,8 +234,11 @@ class Register(private val db: PosDatabase) {
             val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash)
             if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
             val ingredients = checkedIngredientDemand(menu, cart)
+            val cashier = dao.cashier(cashierId) ?: dao.cashier(OWNER_CASHIER_ID)
+                ?: throw SaleInputException("Profil kasir tidak ditemukan.")
             val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
-                method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName)
+                method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName,
+                cashierName = cashier.name)
             val id = dao.addSale(sale)
             for (item in menu.filter { it.recipe.isEmpty() }) {
                 if (dao.decrement(item.product.id, cart.getValue(item.product.id)) != 1) {
@@ -231,6 +265,7 @@ fun Receipt.asText() = buildString {
     appendLine(sale.storeName)
     if (sale.storeAddress.isNotBlank()) appendLine(sale.storeAddress)
     appendLine("${ticket(sale.id)} • ${dateLabel(sale.time)}")
+    sale.cashierLabel?.let { appendLine(it) }
     appendLine()
     lines.forEach {
         appendLine("${it.quantity} × ${it.productName} — ${rupiah(it.unitPrice * it.quantity)}")

@@ -72,6 +72,7 @@ internal fun CashierScreen(
                             Text("Pilih barang untuk memulai transaksi.", color = Color(0xFFD4E8DF), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
+                    CashierProfilePicker(model)
                     OutlinedTextField(query, onQueryChange, Modifier.fillMaxWidth(), singleLine = true,
                         placeholder = { Text(if (compact) "Cari produk" else "Cari nama atau kategori", maxLines = 1) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
