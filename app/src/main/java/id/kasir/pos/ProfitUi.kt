@@ -1,14 +1,15 @@
 package id.kasir.pos
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -62,8 +63,23 @@ internal fun ProfitGate(model: RegisterModel) {
 internal fun ProfitScreen(menu: List<MenuItem>, ingredients: List<Ingredient>, model: RegisterModel) {
     var page by rememberSaveable { mutableStateOf(ProfitPage.MENU) }
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
-    var editingIngredient by rememberSaveable { mutableStateOf<Long?>(null) }
-    var editingProduct by rememberSaveable { mutableStateOf<Long?>(null) }
+    var editingIngredient by remember { mutableStateOf<Long?>(null) }
+    var editingProduct by remember { mutableStateOf<Long?>(null) }
+    val listState = key(page) { rememberLazyListState() }
+    val ingredient = ingredients.firstOrNull { it.id == editingIngredient }
+    val product = menu.firstOrNull { it.product.id == editingProduct }?.product
+    if (ingredient != null) {
+        HppCostEditor(ingredient.name, ingredient.purchaseCost, ingredient,
+            model, onSave = { cost, quantity, onDone -> model.saveIngredientCost(ingredient.id, cost, quantity, onDone) },
+            onClose = { editingIngredient = null })
+        return
+    }
+    if (product != null) {
+        HppCostEditor(product.name, product.directHpp, null,
+            model, onSave = { cost, _, onDone -> model.saveDirectHpp(product.id, cost, onDone) },
+            onClose = { editingProduct = null })
+        return
+    }
     val (today, zone) = rememberReportClock().value
     val date = selectedDate ?: today
     val report = if (page == ProfitPage.SALES) {
@@ -80,7 +96,7 @@ internal fun ProfitScreen(menu: List<MenuItem>, ingredients: List<Ingredient>, m
     val menuCosts = remember(menu) { menu.associate { it.product.id to it.unitHpp() } }
     key(page) {
         LazyColumn(
-            Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
+            Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
@@ -165,16 +181,6 @@ internal fun ProfitScreen(menu: List<MenuItem>, ingredients: List<Ingredient>, m
             }
         }
     }
-    ingredients.firstOrNull { it.id == editingIngredient }?.let { ingredient ->
-        HppCostDialog(ingredient.name, ingredient.purchaseCost, ingredient,
-            model, onSave = { cost, quantity, onDone -> model.saveIngredientCost(ingredient.id, cost, quantity, onDone) },
-            onClose = { editingIngredient = null })
-    }
-    menu.firstOrNull { it.product.id == editingProduct }?.product?.let { product ->
-        HppCostDialog(product.name, product.directHpp, null,
-            model, onSave = { cost, _, onDone -> model.saveDirectHpp(product.id, cost, onDone) },
-            onClose = { editingProduct = null })
-    }
 }
 
 @Composable
@@ -200,41 +206,41 @@ private fun SalesProfitMetrics(amounts: ProfitAmounts) {
 }
 
 @Composable
-private fun HppCostDialog(
+private fun HppCostEditor(
     name: String, initialCost: Long?, ingredient: Ingredient?, model: RegisterModel,
     onSave: (Long?, Int?, () -> Unit) -> Unit, onClose: () -> Unit
 ) {
-    var amount by rememberSaveable { mutableStateOf(initialCost?.toString().orEmpty()) }
-    var units by rememberSaveable { mutableStateOf(ingredient?.purchaseQuantity?.toString().orEmpty()) }
+    var amount by remember { mutableStateOf(initialCost?.toString().orEmpty()) }
+    var units by remember { mutableStateOf(ingredient?.purchaseQuantity?.toString().orEmpty()) }
     val cost = parseRupiah(amount, maxDigits = 9)
     val quantity = units.toIntOrNull()?.takeIf { it in 1..MAX_INGREDIENT_STOCK }
     val valid = (amount.isBlank() && units.isBlank()) || (cost != null && (ingredient == null || quantity != null))
     val close = { model.clearError(); onClose() }
-    AlertDialog(
-        onDismissRequest = { if (!model.busy) close() },
-        title = { Text(if (ingredient == null) "HPP $name" else "Biaya $name") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(amount, { amount = it.take(24); model.clearError() }, Modifier.fillMaxWidth(),
-                    label = { Text(if (ingredient == null) "HPP per porsi (Rp)" else "Harga beli (Rp)") },
+    BackHandler(enabled = !model.busy, onBack = close)
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 20.dp).verticalContent(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Header("KHUSUS PEMILIK", if (ingredient == null) "HPP $name" else "Biaya $name",
+            "Kosongkan isian jika biaya belum diketahui.")
+        ProfitCard {
+            OutlinedTextField(amount, { amount = it.take(24); model.clearError() }, Modifier.fillMaxWidth(),
+                label = { Text(if (ingredient == null) "HPP per porsi (Rp)" else "Harga beli (Rp)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !model.busy)
+            if (ingredient != null) {
+                OutlinedTextField(units, {
+                    if (it.length <= 9 && it.all { digit -> digit in '0'..'9' }) {
+                        units = it
+                        model.clearError()
+                    }
+                }, Modifier.fillMaxWidth(), label = { Text("Jumlah beli (${ingredient.unit})") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !model.busy)
-                if (ingredient != null) {
-                    OutlinedTextField(units, {
-                        if (it.length <= 9 && it.all { digit -> digit in '0'..'9' }) {
-                            units = it
-                            model.clearError()
-                        }
-                    }, Modifier.fillMaxWidth(), label = { Text("Jumlah beli (${ingredient.unit})") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, enabled = !model.busy)
-                }
-                Text("Kosongkan isian jika biaya belum diketahui.", color = Muted)
-                if (!valid) ErrorText("Isi harga yang valid${if (ingredient != null) " dan jumlah lebih dari 0" else ""}.")
-                ErrorText(model.error)
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(cost, quantity, close) }, enabled = valid && !model.busy) { Text("Simpan") }
-        },
-        dismissButton = { TextButton(onClick = close, enabled = !model.busy) { Text("Batal") } }
-    )
+            if (!valid) ErrorText("Isi harga yang valid${if (ingredient != null) " dan jumlah lebih dari 0" else ""}.")
+            ErrorText(model.error)
+            Button(onClick = { onSave(cost, quantity, close) }, enabled = valid && !model.busy,
+                modifier = Modifier.fillMaxWidth()) { Text("Simpan") }
+            TextButton(onClick = close, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Batal") }
+        }
+    }
 }

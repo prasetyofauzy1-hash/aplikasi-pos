@@ -88,6 +88,12 @@ class MainActivity : ComponentActivity() {
         model.lockProfit()
         super.onPause()
     }
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        // Android Overview can show the live activity without pausing it.
+        if (!isTopResumedActivity) model.lockProfit()
+    }
 }
 
 private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
