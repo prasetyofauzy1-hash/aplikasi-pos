@@ -2,6 +2,8 @@ package id.kasir.pos
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -93,7 +95,7 @@ internal fun StockOpnameScreen(ingredients: List<Ingredient>, model: RegisterMod
         onDismissRequest = { if (!model.busy) confirming = false },
         title = { Text("Simpan stok opname?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Stok sistem ${counted.size} bahan akan diganti dengan hasil hitungan fisik.")
                 if (mismatched.isEmpty()) Text("Semua bahan yang dihitung sesuai.", color = Pine)
                 mismatched.forEach { (ingredient, quantity) ->
