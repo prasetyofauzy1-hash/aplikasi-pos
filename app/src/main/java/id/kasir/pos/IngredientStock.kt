@@ -23,7 +23,9 @@ internal fun stockAmount(quantity: Int, unit: String): String =
 internal fun IngredientStockScreen(
     ingredients: List<Ingredient>,
     model: RegisterModel,
-    onEdit: (Long) -> Unit
+    onEdit: (Long) -> Unit,
+    onStockOpname: () -> Unit,
+    onStockOpnameHistory: () -> Unit
 ) {
     var restockingId by rememberSaveable { mutableStateOf<Long?>(null) }
     LazyColumn(
@@ -33,7 +35,19 @@ internal fun IngredientStockScreen(
         item {
             Header("INVENTARIS", "Stok bahan", "Isi stok bahan sebelum berjualan. Stok berkurang sesuai resep setiap kali penjualan disimpan.")
         }
-        item { Button(onClick = { onEdit(0L) }, enabled = !model.busy) { Text("Tambah bahan") } }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onEdit(0L) }, enabled = !model.busy) { Text("Tambah bahan") }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onStockOpname, enabled = !model.busy && ingredients.isNotEmpty(),
+                        modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
+                        Text("Stok opname")
+                    }
+                    OutlinedButton(onClick = onStockOpnameHistory, enabled = !model.busy, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) { Text("Riwayat opname") }
+                }
+            }
+        }
         if (ingredients.isEmpty()) item { EmptyPanel("Belum ada bahan", "Tambahkan bahan dan jumlah stok yang tersedia.") }
         items(ingredients, key = { it.id }) { ingredient ->
             Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {

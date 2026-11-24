@@ -112,6 +112,11 @@ interface PosDao {
     suspend fun restockIngredient(id: Long, quantity: Int, maxStock: Int): Int
     @Query("UPDATE Ingredient SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrementIngredient(id: Long, quantity: Int): Int
+    @Query("SELECT * FROM Ingredient WHERE id IN (:ids)") suspend fun ingredientsById(ids: Set<Long>): List<Ingredient>
+    @Query("UPDATE Ingredient SET stock = :stock WHERE id = :id") suspend fun setIngredientStock(id: Long, stock: Int): Int
+    @Insert suspend fun addStockCount(count: StockCount): Long
+    @Insert suspend fun addStockCountLines(lines: List<StockCountLine>)
+    @Transaction @Query("SELECT * FROM StockCount ORDER BY time DESC, id DESC") fun stockCounts(): Flow<List<StockCountReport>>
     @Query("DELETE FROM RecipeLine WHERE productId = :productId") suspend fun deleteRecipe(productId: Long)
     @Insert suspend fun addRecipe(recipe: List<RecipeLine>)
     @Transaction
@@ -126,8 +131,9 @@ interface PosDao {
 }
 
 @Database(
-    entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class, CashierProfile::class],
-    version = 5
+    entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class, CashierProfile::class,
+        StockCount::class, StockCountLine::class],
+    version = 6
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
@@ -142,6 +148,14 @@ abstract class PosDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE CashierProfile (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL)")
                 db.execSQL("ALTER TABLE Sale ADD COLUMN cashierName TEXT")
                 addOwnerCashier(db)
+            }
+        }
+
+        private val addStockCounts = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `StockCount` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `time` INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `StockCountLine` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `countId` INTEGER NOT NULL, `ingredientId` INTEGER, `ingredientName` TEXT NOT NULL, `unit` TEXT NOT NULL, `systemStock` INTEGER NOT NULL, `countedStock` INTEGER NOT NULL, FOREIGN KEY(`countId`) REFERENCES `StockCount`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_StockCountLine_countId` ON `StockCountLine` (`countId`)")
             }
         }
 
@@ -170,7 +184,7 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles)
+            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles, addStockCounts)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     addOwnerCashier(db)
