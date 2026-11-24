@@ -1,26 +1,26 @@
 package id.kasir.pos
 
-import java.math.BigDecimal
 import java.math.BigInteger
-import java.math.MathContext
-import java.math.RoundingMode
 
 internal const val MAX_PURCHASE_COST = 999_999_999L
 
 internal fun MenuItem.unitHpp(): Long? {
     if (recipe.isEmpty()) return product.directHpp?.takeIf { it >= 0 }
-    val total = recipe.fold(BigDecimal.ZERO) { sum, (line, ingredient) ->
+    var numerator = BigInteger.ZERO
+    var denominator = BigInteger.ONE
+    for ((line, ingredient) in recipe) {
         val cost = ingredient.purchaseCost?.takeIf { it >= 0 } ?: return null
         val quantity = ingredient.purchaseQuantity?.takeIf { it > 0 } ?: return null
         if (line.quantity <= 0) return null
-        sum + (cost.toBigDecimal() * line.quantity.toBigDecimal())
-            .divide(quantity.toBigDecimal(), MathContext.DECIMAL128)
+        val purchaseQuantity = quantity.toBigInteger()
+        val commonFactor = denominator.gcd(purchaseQuantity)
+        val scale = purchaseQuantity / commonFactor
+        val ingredientCost = cost.toBigInteger() * line.quantity.toBigInteger()
+        numerator = numerator * scale + ingredientCost * (denominator / commonFactor)
+        denominator *= scale
     }
-    return try {
-        total.setScale(0, RoundingMode.HALF_UP).longValueExact()
-    } catch (_: ArithmeticException) {
-        null
-    }
+    val rounded = (numerator + denominator.shiftRight(1)) / denominator
+    return rounded.takeIf { it.bitLength() <= Long.SIZE_BITS - 1 }?.toLong()
 }
 
 internal data class ProfitAmounts(
