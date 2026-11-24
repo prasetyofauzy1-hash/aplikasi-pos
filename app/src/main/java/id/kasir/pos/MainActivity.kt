@@ -4,7 +4,10 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.view.Window
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -20,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
@@ -59,10 +63,12 @@ internal val SoftGreen = Color(0xFFE5EFE4)
 internal val Shape = RoundedCornerShape(20.dp)
 
 class MainActivity : ComponentActivity() {
+    private val model by lazy { ViewModelProvider(this)[RegisterModel::class.java] }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        val model = ViewModelProvider(this)[RegisterModel::class.java]
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(
                 primary = Pine, onPrimary = Color.White, primaryContainer = Lime, onPrimaryContainer = Ink,
@@ -72,10 +78,21 @@ class MainActivity : ComponentActivity() {
                 surfaceContainer = Paper
             )) {
                 Surface(Modifier.fillMaxSize(), color = Paper) {
-                    if (model.unlocked) RegisterApp(model) else UnlockScreen(model)
+                    if (model.unlocked) RegisterApp(model, window) else UnlockScreen(model)
                 }
             }
         }
+    }
+
+    override fun onPause() {
+        model.lockProfit()
+        super.onPause()
+    }
+
+    override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
+        super.onTopResumedActivityChanged(isTopResumedActivity)
+        // Android Overview can show the live activity without pausing it.
+        if (!isTopResumedActivity) model.lockProfit()
     }
 }
 
@@ -83,16 +100,22 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
     REGISTER("Kasir", Icons.Default.ShoppingCart),
     PRODUCTS("Produk", Icons.Default.List),
     HISTORY("Riwayat", Icons.Default.DateRange),
+    PROFIT("Laba", Icons.Default.Star),
     SETTINGS("Toko", Icons.Default.Settings)
 }
 
 @Composable
-private fun RegisterApp(model: RegisterModel) {
+private fun RegisterApp(model: RegisterModel, window: Window) {
     val menu by model.menu.collectAsStateWithLifecycle()
     val ingredients by model.ingredients.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
     val products = remember(menu, cart) { availableCatalog(menu, cartQuantities(cart)) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
+    DisposableEffect(tab, window) {
+        val protectWindow = tab == Tab.PROFIT
+        if (protectWindow) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { if (protectWindow) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
     var showEmailLink by rememberSaveable {
         mutableStateOf(model.initialOwnerEmailOffer)
     }
@@ -123,10 +146,12 @@ private fun RegisterApp(model: RegisterModel) {
     BackHandler(enabled = !main, onBack = closeSubScreen)
     val selectTab: (Tab) -> Unit = { selected ->
         if (!model.busy) {
+            if (tab == Tab.PROFIT && selected != Tab.PROFIT) model.lockProfit()
             tab = selected
             model.clearError()
         }
     }
+    BackHandler(enabled = main && tab == Tab.PROFIT) { selectTab(Tab.REGISTER) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val short = maxHeight < 400.dp
         val narrow = maxWidth < 360.dp || LocalDensity.current.fontScale >= 1.3f
@@ -199,6 +224,7 @@ private fun RegisterApp(model: RegisterModel) {
                         ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
                     }
                     tab == Tab.HISTORY -> tabState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
+                    tab == Tab.PROFIT -> if (model.profitUnlocked) ProfitScreen(menu, ingredients, model) else ProfitGate(model)
                     tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
                         model.dismissInitialOwnerEmailOffer()
                         model.clearError()

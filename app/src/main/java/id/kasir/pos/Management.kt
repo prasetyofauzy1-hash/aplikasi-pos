@@ -234,7 +234,7 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
 }
 
 @Composable
-private fun rememberReportClock(): State<Pair<Long, TimeZone>> {
+internal fun rememberReportClock(): State<Pair<Long, TimeZone>> {
     val context = LocalContext.current
     fun currentDay(): Pair<Long, TimeZone> {
         val zone = TimeZone.getDefault()
@@ -259,7 +259,7 @@ private fun rememberReportClock(): State<Pair<Long, TimeZone>> {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReportDateControls(date: Long, today: Long, onSelect: (Long) -> Unit) {
+internal fun ReportDateControls(date: Long, today: Long, onSelect: (Long) -> Unit) {
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     if (choosingDate) {
         val picker = remember(date) { DatePickerState(locale = indonesia, initialSelectedDateMillis = date) }

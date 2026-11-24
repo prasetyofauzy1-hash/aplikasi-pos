@@ -11,6 +11,7 @@ Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat, t
 - Pilih menu di **Kasir**, periksa keranjang, lalu catat pembayaran **Tunai** atau **QRIS**. QRIS hanya dicatat setelah Anda memeriksa pembayaran di luar aplikasi. Menu hanya bisa dijual jika bahannya cukup, termasuk ketika beberapa menu memakai bahan yang sama. Stok bahan berkurang setelah transaksi berhasil disimpan.
 - Di tab **Toko**, gunakan **Pilih gambar QRIS** untuk menyimpan gambar QRIS statis dari galeri. Gambar dapat diganti atau dihapus kapan saja. Saat memilih **QRIS** di pembayaran, tampilkan kode di layar untuk dipindai pelanggan. Pelanggan memasukkan nominal yang tertera; tekan **Konfirmasi & simpan QRIS** hanya setelah dana masuk.
 - Buka **Riwayat** dan pilih tanggal untuk melihat total penjualan, rincian Tunai dan QRIS, serta struk hari itu. Pilih **Produk terjual** untuk mencocokkan jumlah dan omzet per produk dengan catatan manual. **Bagikan struk** membuka menu berbagi Android; pilih WhatsApp jika terpasang. Struk yang dibagikan berupa teks.
+- Buka **Laba** dengan PIN pemilik. Isi **Biaya bahan** dengan harga beli dan jumlah sesuai satuan stok (misalnya Rp25.000 per 1.000 g). **Per menu** menampilkan HPP dan estimasi laba per porsi; produk tanpa resep dapat diisi HPP-nya langsung. **Penjualan** menampilkan laba kotor harian per menu berdasarkan HPP saat transaksi. Penjualan tanpa HPP, termasuk transaksi lama, tidak masuk hitungan laba.
 
 ### Cetak struk Bluetooth
 
