@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 8,
-    "identityHash": "e8ad776c23aac64f0cea383963c17642",
+    "identityHash": "e56c366892a7f2a1224959be3e1fd4e8",
     "entities": [
       {
         "tableName": "Product",
@@ -599,7 +599,7 @@
       },
       {
         "tableName": "StoreSettings",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, `address` TEXT NOT NULL, `logoName` TEXT NOT NULL, `qrisImage` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `name` TEXT NOT NULL, `address` TEXT NOT NULL, `logoName` TEXT NOT NULL, `qrisImage` TEXT NOT NULL, `extraCharges` TEXT NOT NULL, PRIMARY KEY(`id`))",
         "fields": [
           {
             "fieldPath": "id",
@@ -630,6 +630,12 @@
             "columnName": "qrisImage",
             "affinity": "TEXT",
             "notNull": true
+          },
+          {
+            "fieldPath": "extraCharges",
+            "columnName": "extraCharges",
+            "affinity": "TEXT",
+            "notNull": true
           }
         ],
         "primaryKey": {
@@ -642,7 +648,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e8ad776c23aac64f0cea383963c17642')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e56c366892a7f2a1224959be3e1fd4e8')"
     ]
   }
 }

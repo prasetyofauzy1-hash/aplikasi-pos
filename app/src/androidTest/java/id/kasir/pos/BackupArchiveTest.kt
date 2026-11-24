@@ -70,7 +70,10 @@ class BackupArchiveTest {
         val archiveFile = File.createTempFile("backup-test-", ".zip", context.cacheDir)
         val logo = File(context.filesDir, "logo-${UUID.randomUUID()}.png")
         val qris = File(context.filesDir, "qris-${UUID.randomUUID()}.png")
-        val profile = BackupProfile(StoreProfile("Jus Test", "Manahan", logo.name), qris.name)
+        val profile = BackupProfile(
+            StoreProfile("Jus Test", "Manahan", logo.name), qris.name,
+            listOf(ExtraCharge("PPN", percent = 1100), ExtraCharge("Layanan", amount = 1000, enabled = false))
+        )
         try {
             logo.writeText("logo")
             qris.writeText("qris")
@@ -99,7 +102,9 @@ class BackupArchiveTest {
                 qris.delete()
                 PosDatabase.withBackupDatabase(context, targetName) { target ->
                     val old = target.dao().add(Product(name = "Lama", category = "Jus", price = 100, stock = 1))
-                    val oldSettings = StoreSettings(name = "Nama lama", address = "", logoName = "", qrisImage = "")
+                    val oldSettings = BackupProfile(
+                        StoreProfile("Nama lama"), "", listOf(ExtraCharge("Biaya lama", amount = 500))
+                    ).settings()
                     target.dao().saveStoreSettings(oldSettings)
                     val targetDb = target.openHelper.writableDatabase
                     targetDb.execSQL(

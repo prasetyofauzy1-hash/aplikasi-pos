@@ -67,14 +67,14 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             preferences.getString("address", null).orEmpty(),
             preferences.getString("logo", null).orEmpty()
         ),
-        preferences.getString("qrisImage", null).orEmpty()
+        preferences.getString("qrisImage", null).orEmpty(),
+        chargesFromJson(preferences.getString("extraCharges", null))
     )
     private var shop by mutableStateOf(legacyShop)
     val profile get() = shop.store
     val qrisImageName get() = shop.qris
+    val extraCharges get() = shop.extraCharges
     var receipt by mutableStateOf<Receipt?>(null)
-        private set
-    var extraCharges by mutableStateOf(chargesFromJson(preferences.getString("extraCharges", null)))
         private set
     internal var printer by mutableStateOf(preferences.getString("printerAddress", null)?.let { address ->
         PairedPrinter(address, preferences.getString("printerName", null) ?: "Perangkat Bluetooth")
@@ -405,10 +405,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveExtraCharges(charges: List<ExtraCharge>, onDone: () -> Unit = {}) = runAction("Biaya tambahan tidak dapat disimpan.") {
-        withContext(Dispatchers.IO) {
-            if (!preferences.edit().putString("extraCharges", chargesToJson(charges)).commit()) throw IOException()
+        shop = withContext(Dispatchers.IO) {
+            currentShop().copy(extraCharges = charges).also { dao.saveStoreSettings(it.settings()) }
         }
-        extraCharges = charges
         onDone()
     }
 

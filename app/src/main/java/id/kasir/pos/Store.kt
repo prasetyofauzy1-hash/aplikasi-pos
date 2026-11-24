@@ -65,7 +65,8 @@ data class StoreSettings(
     val name: String,
     val address: String,
     val logoName: String,
-    val qrisImage: String
+    val qrisImage: String,
+    val extraCharges: String
 )
 
 @Entity
@@ -226,7 +227,7 @@ abstract class PosDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE StoreSettings (id INTEGER NOT NULL PRIMARY KEY, name TEXT NOT NULL, " +
-                        "address TEXT NOT NULL, logoName TEXT NOT NULL, qrisImage TEXT NOT NULL)"
+                        "address TEXT NOT NULL, logoName TEXT NOT NULL, qrisImage TEXT NOT NULL, extraCharges TEXT NOT NULL)"
                 )
             }
         }

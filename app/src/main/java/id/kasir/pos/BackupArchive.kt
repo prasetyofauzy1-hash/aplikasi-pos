@@ -6,6 +6,7 @@ import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -19,14 +20,19 @@ internal const val MAX_BACKUP_BYTES = 6 * 1024 * 1024
 private const val MAX_EXTRACTED_BYTES = 64L * 1024 * 1024
 private const val SNAPSHOT_NAME = "data.db"
 private const val PROFILE_NAME = "store.json"
+private const val MAX_PROFILE_BYTES = 1024L * 1024
 private const val FORMAT = 1
 private val mediaName = Regex("(logo|qris)-[a-f0-9-]{36}\\.png")
 
-internal data class BackupProfile(val store: StoreProfile, val qris: String) {
-    fun settings() = StoreSettings(name = store.name, address = store.address, logoName = store.logoName, qrisImage = qris)
+internal data class BackupProfile(val store: StoreProfile, val qris: String, val extraCharges: List<ExtraCharge> = emptyList()) {
+    fun settings() = StoreSettings(
+        name = store.name, address = store.address, logoName = store.logoName, qrisImage = qris,
+        extraCharges = chargesToJson(extraCharges)
+    )
 }
 
-internal fun StoreSettings.backupProfile() = BackupProfile(StoreProfile(name, address, logoName), qrisImage)
+internal fun StoreSettings.backupProfile() =
+    BackupProfile(StoreProfile(name, address, logoName), qrisImage, chargesFromJson(extraCharges))
 
 internal class BackupException(message: String) : IOException(message)
 
@@ -73,9 +79,11 @@ internal class BackupArchive(private val context: Context, private val database:
             if (listOf(profile.store.logoName, profile.qris).any { name ->
                     name.isNotEmpty() && media.none { it.name == name }
                 }) throw BackupException("File logo atau QRIS tidak ditemukan. Simpan ulang gambar sebelum mencadangkan.")
-            if ((media + snapshot).sumOf { it.length() } > MAX_EXTRACTED_BYTES - 4096) tooLarge()
+            val metadata = profile.toJson().toString().toByteArray(Charsets.UTF_8)
+            val extractedSize = (media + snapshot).sumOf { it.length() } + metadata.size
+            if (metadata.size > MAX_PROFILE_BYTES || extractedSize > MAX_EXTRACTED_BYTES) tooLarge()
             ZipOutputStream(LimitedOutput(destination.outputStream())).use { zip ->
-                zip.entry(PROFILE_NAME) { write(profile.toJson().toString().toByteArray(Charsets.UTF_8)) }
+                zip.entry(PROFILE_NAME) { write(metadata) }
                 for (file in listOf(snapshot) + media) {
                     zip.entry(if (file == snapshot) SNAPSHOT_NAME else file.name) {
                         file.inputStream().use { it.copyTo(this) }
@@ -176,7 +184,11 @@ internal class BackupArchive(private val context: Context, private val database:
                 val entry = zip.nextEntry ?: break
                 require(!entry.isDirectory && seen.add(entry.name))
                 when (val name = entry.name) {
-                    PROFILE_NAME -> profile = readBackupProfile(zip.readBounded(4096).toString(Charsets.UTF_8))
+                    PROFILE_NAME -> {
+                        val metadata = zip.readBounded(minOf(MAX_PROFILE_BYTES, remaining))
+                        remaining -= metadata.size
+                        profile = readBackupProfile(metadata.toString(Charsets.UTF_8))
+                    }
                     else -> {
                         val target = when {
                             name == SNAPSHOT_NAME -> snapshot
@@ -200,6 +212,7 @@ internal class BackupArchive(private val context: Context, private val database:
 
 private fun BackupProfile.toJson() = JSONObject().put("format", FORMAT)
     .put("name", store.name).put("address", store.address).put("logo", store.logoName).put("qris", qris)
+    .put("extraCharges", JSONArray(chargesToJson(extraCharges)))
 
 private fun readBackupProfile(text: String): BackupProfile {
     val json = JSONObject(text)
@@ -211,7 +224,14 @@ private fun readBackupProfile(text: String): BackupProfile {
     require(name.length in 1..60 && address.length <= 180)
     require(logo.isEmpty() || (logo.startsWith("logo-") && mediaName.matches(logo)))
     require(qris.isEmpty() || (qris.startsWith("qris-") && mediaName.matches(qris)))
-    return BackupProfile(StoreProfile(name, address, logo), qris)
+    val rawCharges = if (json.has("extraCharges")) json.getJSONArray("extraCharges") else JSONArray()
+    val charges = chargesFromJson(rawCharges.toString())
+    require(charges.size == rawCharges.length() && charges.all {
+        it.name.isNotBlank() && it.name.length <= 30 &&
+            ((it.percent in 1..MAX_PERCENT && it.amount == 0L) ||
+                (it.percent == 0 && it.amount in 1L..999_999_999L))
+    })
+    return BackupProfile(StoreProfile(name, address, logo), qris, charges)
 }
 
 private fun SupportSQLiteDatabase.businessTables(): List<String> {
