@@ -82,20 +82,21 @@ private fun RegisterApp(model: RegisterModel) {
     val sales by model.sales.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(Tab.REGISTER) }
     var orderScreen by rememberSaveable { mutableStateOf("") }
-    var editing by remember { mutableStateOf<Product?>(null) }
+    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedId = editingId
     val receipt = model.receipt
     val closeSubScreen: () -> Unit = {
         if (!model.busy) {
             when {
                 receipt != null -> model.closeReceipt()
-                editing != null -> editing = null
+                selectedId != null -> editingId = null
                 orderScreen == "payment" -> orderScreen = "cart"
                 else -> orderScreen = ""
             }
             model.clearError()
         }
     }
-    val main = receipt == null && orderScreen.isEmpty() && editing == null
+    val main = receipt == null && orderScreen.isEmpty() && selectedId == null
     BackHandler(enabled = !main, onBack = closeSubScreen)
     Scaffold(
         containerColor = Paper,
@@ -103,7 +104,7 @@ private fun RegisterApp(model: RegisterModel) {
             if (main) BrandBar(model.profile)
             else SubBar(when {
                 receipt != null -> "Struk transaksi"
-                editing != null -> if (editing?.id == 0L) "Tambah produk" else "Edit produk"
+                selectedId != null -> if (selectedId == 0L) "Tambah produk" else "Edit produk"
                 orderScreen == "payment" -> "Pembayaran"
                 else -> "Keranjang"
             }, closeSubScreen)
@@ -124,11 +125,21 @@ private fun RegisterApp(model: RegisterModel) {
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
                 receipt != null -> ReceiptScreen(receipt, closeSubScreen)
-                editing != null -> ProductForm(editing!!, model, onClose = { editing = null })
+                selectedId != null -> {
+                    val product = if (selectedId == 0L) Product(name = "", category = "", price = 0, stock = 0)
+                        else products.firstOrNull { it.id == selectedId }
+                    if (product != null) key(selectedId) {
+                        ProductForm(product, model, onClose = { editingId = null })
+                    } else {
+                        Box(Modifier.padding(20.dp)) {
+                            EmptyPanel("Produk tidak tersedia", "Kembali ke daftar dan buka produk lagi.")
+                        }
+                    }
+                }
                 orderScreen == "cart" -> CartScreen(products, model, onPay = { orderScreen = "payment" })
                 orderScreen == "payment" -> PaymentScreen(products, model, onPaid = { orderScreen = "" })
                 tab == Tab.REGISTER -> CashierScreen(products, model, onCart = { orderScreen = "cart" })
-                tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editing = it })
+                tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
                 tab == Tab.HISTORY -> HistoryScreen(sales, model)
                 tab == Tab.SETTINGS -> SettingsScreen(model)
             }

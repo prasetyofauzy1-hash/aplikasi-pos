@@ -52,7 +52,7 @@ internal fun MetricRow(label: String, value: String, strong: Boolean = false) {
 }
 
 @Composable
-internal fun ProductsScreen(products: List<Product>, onEdit: (Product) -> Unit) {
+internal fun ProductsScreen(products: List<Product>, onEdit: (Long) -> Unit) {
     var filter by rememberSaveable { mutableStateOf("") }
     val shown = products.filter { it.name.contains(filter.trim(), true) || it.category.contains(filter.trim(), true) }
     LazyColumn(
@@ -68,7 +68,7 @@ internal fun ProductsScreen(products: List<Product>, onEdit: (Product) -> Unit) 
                     Text("${products.size} produk", color = Pine, fontWeight = FontWeight.Bold)
                     Text("${products.count { it.stock in 0..5 }} stok menipis", color = Muted, style = MaterialTheme.typography.labelMedium)
                 }
-                Button(onClick = { onEdit(Product(name = "", category = "", price = 0, stock = 0)) }) {
+                Button(onClick = { onEdit(0L) }) {
                     Icon(Icons.Default.Add, null, Modifier.size(19.dp))
                     Spacer(Modifier.width(5.dp))
                     Text("Tambah produk")
@@ -83,7 +83,7 @@ internal fun ProductsScreen(products: List<Product>, onEdit: (Product) -> Unit) 
         }
         if (shown.isEmpty()) item { EmptyPanel("Belum ada hasil", "Tambahkan produk atau ubah pencarian.") }
         items(shown, key = { it.id }) { product ->
-            Surface(onClick = { onEdit(product) }, shape = Shape, border = BorderStroke(1.dp, Line), color = Color.White) {
+            Surface(onClick = { onEdit(product.id) }, shape = Shape, border = BorderStroke(1.dp, Line), color = Color.White) {
                 Row(Modifier.fillMaxWidth().padding(13.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     CategoryMark(product.category)
@@ -104,10 +104,10 @@ internal fun ProductsScreen(products: List<Product>, onEdit: (Product) -> Unit) 
 
 @Composable
 internal fun ProductForm(product: Product, model: RegisterModel, onClose: () -> Unit) {
-    var name by rememberSaveable(product.id) { mutableStateOf(product.name) }
-    var category by rememberSaveable(product.id) { mutableStateOf(product.category) }
-    var price by rememberSaveable(product.id) { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
-    var stock by rememberSaveable(product.id) { mutableStateOf(if (product.id == 0L) "" else product.stock.toString()) }
+    var name by rememberSaveable { mutableStateOf(product.name) }
+    var category by rememberSaveable { mutableStateOf(product.category) }
+    var price by rememberSaveable { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
+    var stock by rememberSaveable { mutableStateOf(if (product.id == 0L) "" else product.stock.toString()) }
     var confirming by rememberSaveable { mutableStateOf(false) }
     val numericPrice = parseRupiah(price, maxDigits = 9)
     val numericStock = stock.toIntOrNull()
