@@ -19,7 +19,7 @@ class BackupArchiveTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val name = "previous-${UUID.randomUUID()}.db"
-        val schema = instrumentation.context.assets.open("id.kasir.pos.PosDatabase/6.json").bufferedReader().use {
+        val schema = instrumentation.context.assets.open("id.kasir.pos.PosDatabase/7.json").bufferedReader().use {
             JSONObject(it.readText()).getJSONObject("database")
         }
         try {
@@ -46,7 +46,7 @@ class BackupArchiveTest {
                     "VALUES (41, 5678, 20000, 20000, 'Tunai', 'Jus Test', '', '', 'Maya')")
                 db.execSQL("INSERT INTO SaleLine (saleId, productName, unitPrice, quantity, productId) " +
                     "VALUES (41, 'Jus', 20000, 1, 12)")
-                db.version = 6
+                db.version = 7
             }
             PosDatabase.withBackupDatabase(context, name) { upgraded ->
                 assertEquals("Maya", upgraded.dao().cashier(1)?.name)
@@ -85,11 +85,14 @@ class BackupArchiveTest {
                 val countLine = StockCountLine(1, countId, ingredient.id, ingredient.name, ingredient.unit, 250, 200)
                 dao.addStockCountLines(listOf(countLine))
                 dao.addRecipe(listOf(RecipeLine(product, ingredient.id, 100)))
-                dao.putCartItem(CartItem(product, 1))
-                val sale = Sale(41, 1234, 15000, 15000, "Tunai", profile.store.name, profile.store.address, logo.name, cashier.name)
+                dao.addCartItem(CartItem(productId = product, quantity = 1))
+                val sale = Sale(41, 1234, 16000, 16000, "Tunai", profile.store.name, profile.store.address,
+                    logo.name, cashier.name, subtotal = 15000)
                 dao.addSale(sale)
                 dao.addLines(listOf(SaleLine(saleId = sale.id, productName = "Jus Berry",
-                    unitPrice = 15000, quantity = 1, productId = product)))
+                    unitPrice = 15000, quantity = 1, productId = product, options = "Besar", note = "Less sugar")))
+                val charge = SaleCharge(1, sale.id, "Layanan", 1000)
+                dao.addCharges(listOf(charge))
                 BackupArchive(context, source).create(archiveFile, profile)
 
                 logo.delete()
@@ -122,8 +125,11 @@ class BackupArchiveTest {
                     assertEquals(ingredient, menu.recipe.single().ingredient)
                     assertEquals(countLine, target.dao().stockCounts().first().single().lines.single())
                     assertEquals(cashier, target.dao().cashier(cashier.id))
-                    assertEquals(sale, target.dao().receipt(sale.id)?.sale)
-                    assertEquals(product, target.dao().receipt(sale.id)?.lines?.single()?.productId)
+                    val receipt = requireNotNull(target.dao().receipt(sale.id))
+                    assertEquals(sale, receipt.sale)
+                    assertEquals(product, receipt.lines.single().productId)
+                    assertEquals("Less sugar", receipt.lines.single().note)
+                    assertEquals(charge, receipt.charges.single())
                     assertTrue(target.dao().cartSnapshot().isEmpty())
                 }
             }
