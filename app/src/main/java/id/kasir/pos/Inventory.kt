@@ -7,6 +7,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Relation
+import org.json.JSONObject
 
 internal const val MAX_INGREDIENT_STOCK = 999_999_999
 internal val ingredientUnits = listOf("g", "ml", "buah")
@@ -128,4 +129,23 @@ internal fun stockCountLines(ingredients: List<Ingredient>, counted: Map<Long, I
         StockCountLine(countId = 0, ingredientId = id, ingredientName = ingredient.name, unit = ingredient.unit,
             systemStock = ingredient.stock, countedStock = quantity)
     }.sortedBy { it.ingredientName.lowercase() }
+}
+
+internal fun encodeIngredientDeductions(deductions: Map<Long, Int>): String =
+    JSONObject().apply {
+        for ((id, quantity) in deductions) put(id.toString(), quantity)
+    }.toString()
+
+internal suspend fun restoreSaleIngredients(
+    snapshot: String?,
+    restock: suspend (ingredientId: Long, quantity: Int) -> Int
+) {
+    if (snapshot == null) return
+    val deductions = JSONObject(snapshot)
+    for (key in deductions.keys()) {
+        val quantity = deductions.getInt(key)
+        if (quantity !in 1..MAX_INGREDIENT_STOCK || restock(key.toLong(), quantity) != 1) {
+            throw SaleInputException("Stok bahan tidak dapat dikembalikan. Periksa apakah bahan masih tersedia dan stok tidak melebihi batas.")
+        }
+    }
 }

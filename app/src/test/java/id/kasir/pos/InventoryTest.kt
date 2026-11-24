@@ -1,5 +1,6 @@
 package id.kasir.pos
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -32,6 +33,32 @@ class InventoryTest {
             checkedIngredientDemand(listOf(berryGo, smoothie), mapOf(1L to 1, 2L to 1)))
         assertEquals(mapOf(1L to 400, 2L to 400),
             checkedIngredientDemand(listOf(berryGo), mapOf(1L to 2)))
+    }
+
+    @Test fun deletionRestoresTheOriginalQuantitiesEvenIfARecipeChanges() = runBlocking {
+        val cart = mapOf(1L to 1, 2L to 1)
+        val snapshot = encodeIngredientDeductions(checkedIngredientDemand(listOf(berryGo, smoothie), cart))
+        val changedRecipe = menuItem(1, "Berry Go", berries to 100)
+        val restored = mutableMapOf<Long, Int>()
+        restoreSaleIngredients(snapshot) { id, quantity ->
+            restored[id] = quantity
+            1
+        }
+        assertEquals(mapOf(1L to 200, 2L to 400, 3L to 150), restored)
+        assertFalse(checkedIngredientDemand(listOf(changedRecipe, smoothie), cart) == restored)
+    }
+
+    @Test fun deletionDoesNotGuessAtStockForOldSalesOrSalesWithoutRecipes() = runBlocking {
+        restoreSaleIngredients(null) { _, _ -> error("A legacy sale must not use the current recipe") }
+        restoreSaleIngredients(encodeIngredientDeductions(emptyMap())) { _, _ -> error("No ingredients were deducted") }
+    }
+
+    @Test fun deletionFailsWhenADeductionCannotBeRestored() {
+        assertThrows(SaleInputException::class.java) {
+            runBlocking {
+                restoreSaleIngredients(encodeIngredientDeductions(mapOf(1L to 200))) { _, _ -> 0 }
+            }
+        }
     }
 
     @Test fun rejectsAnOrderThatIndividuallyFitsButTogetherRunsOut() {
