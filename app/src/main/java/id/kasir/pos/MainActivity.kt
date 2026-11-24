@@ -4,7 +4,10 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.view.Window
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -65,6 +68,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setRecentsScreenshotEnabled(false)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(
                 primary = Pine, onPrimary = Color.White, primaryContainer = Lime, onPrimaryContainer = Ink,
@@ -74,7 +78,7 @@ class MainActivity : ComponentActivity() {
                 surfaceContainer = Paper
             )) {
                 Surface(Modifier.fillMaxSize(), color = Paper) {
-                    if (model.unlocked) RegisterApp(model) else UnlockScreen(model)
+                    if (model.unlocked) RegisterApp(model, window) else UnlockScreen(model)
                 }
             }
         }
@@ -95,12 +99,17 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 }
 
 @Composable
-private fun RegisterApp(model: RegisterModel) {
+private fun RegisterApp(model: RegisterModel, window: Window) {
     val menu by model.menu.collectAsStateWithLifecycle()
     val ingredients by model.ingredients.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
     val products = remember(menu, cart) { availableCatalog(menu, cartQuantities(cart)) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
+    DisposableEffect(tab, window) {
+        val protectWindow = tab == Tab.PROFIT && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        if (protectWindow) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { if (protectWindow) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
+    }
     var showEmailLink by rememberSaveable {
         mutableStateOf(model.initialOwnerEmailOffer)
     }
