@@ -12,6 +12,12 @@ import org.junit.Test
 import java.util.concurrent.TimeUnit
 
 class OwnerAuthTest {
+    @Test fun matchesOnlyTheConfirmedEmailIgnoringCaseAndOuterSpaces() {
+        assertTrue(ownerEmailsMatch(" Owner@example.com ", "owner@example.com"))
+        assertFalse(ownerEmailsMatch("owner@example.com", "ower@example.com"))
+        assertFalse(ownerEmailsMatch(" ", " "))
+    }
+
     @Test fun signsUpAndSignsInWithFirebase() {
         withServer { auth, server ->
             val email = "owner@example.com"

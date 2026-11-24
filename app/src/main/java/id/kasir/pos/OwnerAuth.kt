@@ -62,3 +62,6 @@ internal class OwnerAuth(
 internal class OwnerAuthException(message: String) : IOException(message)
 
 internal fun OwnerAccount.matches(linkedUid: String?) = linkedUid != null && uid == linkedUid
+
+internal fun ownerEmailsMatch(email: String, confirmation: String) =
+    email.isNotBlank() && email.trim().equals(confirmation.trim(), ignoreCase = true)

@@ -18,39 +18,83 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun LinkOwnerEmailDialog(model: RegisterModel, skippable: Boolean, onDismiss: () -> Unit) {
+internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
     val dismiss = { if (!model.busy) onDismiss() }
+    val skippable = model.initialOwnerEmailOffer
+    val linked = model.linkedOwnerEmail != null
+    var unlinking by rememberSaveable { mutableStateOf(!model.emailAvailable) }
+    var pin by remember { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
+    var confirmation by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var createAccount by rememberSaveable { mutableStateOf(true) }
+    val confirmed = ownerEmailsMatch(email, confirmation)
     AlertDialog(
         onDismissRequest = dismiss,
-        title = { Text("Hubungkan email pemilik") },
+        title = { Text(when {
+            unlinking -> "Hapus tautan email pemilik"
+            linked -> "Ubah email pemilik"
+            else -> "Hubungkan email pemilik"
+        }) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Gunakan akun email untuk membuat PIN baru jika lupa. Ini opsional dan perlu internet. Data toko tetap di perangkat ini.")
-                OutlinedTextField(email, { email = it; model.clearError() }, Modifier.fillMaxWidth(),
-                    label = { Text("Email") }, enabled = !model.busy, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
-                OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
+                if (!skippable) {
+                    OutlinedTextField(pin, { pin = it.filter { c -> c in '0'..'9' }.take(6); model.clearError() },
+                        Modifier.fillMaxWidth(), label = { Text("PIN pemilik saat ini") },
+                        enabled = !model.busy, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+                }
+                if (unlinking) {
+                    Text("Email ini tidak akan bisa digunakan untuk memulihkan PIN perangkat ini. Data toko tetap tersimpan.")
+                } else {
+                    Text("Gunakan akun email untuk membuat PIN baru jika lupa. Ini opsional dan perlu internet. Data toko tetap di perangkat ini.")
+                    OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
+                    OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
+                    if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
+                    OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
+                    TextButton(enabled = !model.busy, onClick = {
+                        createAccount = !createAccount
+                        password = ""
+                        model.clearError()
+                    }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
+                    if (linked) {
+                        TextButton(enabled = !model.busy, onClick = {
+                            unlinking = true
+                            pin = ""
+                            password = ""
+                            model.clearError()
+                        }) { Text("Hapus tautan email") }
+                    }
+                }
                 ErrorText(model.error)
-                TextButton(enabled = !model.busy, onClick = {
-                    createAccount = !createAccount
-                    password = ""
-                    model.clearError()
-                }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = !model.busy && email.isNotBlank() && if (createAccount) password.length >= 6 else password.isNotEmpty(),
-                onClick = { model.linkOwnerEmail(email.trim(), password, createAccount, onDismiss) }
-            ) { Text(if (model.busy) "Menghubungkan…" else if (createAccount) "Daftar" else "Masuk") }
+                enabled = !model.busy && (skippable || pin.length == 6) &&
+                    (unlinking || confirmed && if (createAccount) password.length >= 6 else password.isNotEmpty()),
+                onClick = {
+                    if (unlinking) model.unlinkOwnerEmail(pin, onDismiss)
+                    else model.linkOwnerEmail(pin, email, confirmation, password, createAccount, onDismiss)
+                }
+            ) { Text(when {
+                model.busy -> "Memproses…"
+                unlinking -> "Hapus tautan"
+                createAccount -> "Daftar"
+                else -> "Masuk"
+            }) }
         },
         dismissButton = {
             TextButton(onClick = dismiss, enabled = !model.busy) { Text(if (skippable) "Nanti saja" else "Batal") }
         }
     )
+}
+
+@Composable
+private fun OwnerEmailField(value: String, label: String, enabled: Boolean, onChange: (String) -> Unit) {
+    OutlinedTextField(value, onChange, Modifier.fillMaxWidth(),
+        label = { Text(label) }, enabled = enabled, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
 }
 
 @Composable

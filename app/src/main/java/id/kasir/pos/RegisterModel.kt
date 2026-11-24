@@ -42,6 +42,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var firstUnlock by mutableStateOf(false)
         private set
+    var initialOwnerEmailOffer by mutableStateOf(false)
+        private set
     var linkedOwnerEmail by mutableStateOf(preferences.getString("ownerEmail", null))
         private set
     var resettingPin by mutableStateOf(false)
@@ -92,6 +94,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             }
             if (valid) {
                 firstUnlock = !pinConfigured
+                initialOwnerEmailOffer = firstUnlock && emailAvailable && linkedOwnerEmail == null
                 pinConfigured = true
                 resettingPin = false
                 unlocked = true
@@ -111,18 +114,48 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 .commit()) throw IOException()
     }
 
-    fun linkOwnerEmail(email: String, password: String, createAccount: Boolean, onDone: () -> Unit) {
+    fun dismissInitialOwnerEmailOffer() {
+        initialOwnerEmailOffer = false
+    }
+
+    fun linkOwnerEmail(
+        pin: String, email: String, confirmation: String, password: String, createAccount: Boolean, onDone: () -> Unit
+    ) {
         val auth = ownerAuth ?: return
-        if (!unlocked || linkedOwnerEmail != null) return
+        if (!unlocked || busy) return
+        if (!ownerEmailsMatch(email, confirmation)) {
+            error = "Konfirmasi email tidak sama."
+            return
+        }
+        val requiresPin = !initialOwnerEmailOffer || linkedOwnerEmail != null
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
             linkedOwnerEmail = withContext(Dispatchers.IO) {
-                val account = auth.authenticate(email, password, createAccount)
+                if (requiresPin) requireOwnerPin(pin)
+                val account = auth.authenticate(email.trim(), password, createAccount)
                 if (!preferences.edit().putString("ownerEmail", account.email)
                         .putString("ownerUid", account.uid).commit()) throw IOException()
                 account.email
             }
+            dismissInitialOwnerEmailOffer()
             onDone()
         }
+    }
+
+    fun unlinkOwnerEmail(pin: String, onDone: () -> Unit) {
+        if (!unlocked || linkedOwnerEmail == null) return
+        runAction("Tautan email tidak dapat dihapus. Coba lagi.") {
+            withContext(Dispatchers.IO) {
+                requireOwnerPin(pin)
+                if (!preferences.edit().remove("ownerEmail").remove("ownerUid").commit()) throw IOException()
+            }
+            linkedOwnerEmail = null
+            onDone()
+        }
+    }
+
+    private fun requireOwnerPin(pin: String) {
+        if (pin.length != 6 || !pin.all { it in '0'..'9' }) throw SaleInputException("Masukkan PIN enam angka.")
+        if (!verifyOwnerPin(pin)) throw SaleInputException("PIN salah. Coba lagi.")
     }
 
     fun verifyOwnerForPinReset(password: String, onDone: () -> Unit) {
@@ -157,6 +190,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     fun lock() {
         if (busy) return
         receipt = null
+        dismissInitialOwnerEmailOffer()
         clearError()
         unlocked = false
     }

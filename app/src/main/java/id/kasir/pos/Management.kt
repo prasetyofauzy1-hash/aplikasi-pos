@@ -326,14 +326,13 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         ) { Text("Simpan profil toko") }
         HorizontalDivider(color = Line)
         EmptyPanel("Akses pemilik", "Satu PIN untuk mengunci akses kasir di perangkat ini.")
-        if (model.emailAvailable) {
-            val email = model.linkedOwnerEmail
-            if (email == null) {
-                OutlinedButton(onClick = onLinkOwner, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
-                    Text("Hubungkan email pemilik")
-                }
-            } else {
+        val email = model.linkedOwnerEmail
+        if (model.emailAvailable || email != null) {
+            if (email != null) {
                 Text("Email pemilik terhubung: $email", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+            OutlinedButton(onClick = onLinkOwner, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
+                Text(if (email == null) "Hubungkan email pemilik" else "Kelola email pemilik")
             }
         }
         OutlinedButton(onClick = model::lock, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Kunci aplikasi") }

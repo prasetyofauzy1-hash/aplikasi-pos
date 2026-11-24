@@ -86,7 +86,7 @@ private fun RegisterApp(model: RegisterModel) {
     val sales by model.sales.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     var showEmailLink by rememberSaveable {
-        mutableStateOf(model.firstUnlock && model.emailAvailable && model.linkedOwnerEmail == null)
+        mutableStateOf(model.initialOwnerEmailOffer)
     }
     var orderScreen by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -149,6 +149,7 @@ private fun RegisterApp(model: RegisterModel) {
                 tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
                 tab == Tab.HISTORY -> HistoryScreen(sales, model)
                 tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
+                    model.dismissInitialOwnerEmailOffer()
                     model.clearError()
                     showEmailLink = true
                 })
@@ -156,7 +157,8 @@ private fun RegisterApp(model: RegisterModel) {
         }
     }
     if (showEmailLink) {
-        LinkOwnerEmailDialog(model, skippable = model.firstUnlock) {
+        LinkOwnerEmailDialog(model) {
+            model.dismissInitialOwnerEmailOffer()
             model.clearError()
             showEmailLink = false
         }
