@@ -20,7 +20,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
-import java.util.Calendar
 import java.util.Locale
 
 @Entity
@@ -67,7 +66,9 @@ interface PosDao {
     @Query("DELETE FROM Product WHERE id = :id") suspend fun delete(id: Long)
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
-    @Query("SELECT * FROM Sale ORDER BY id DESC") fun sales(): Flow<List<Sale>>
+    @Transaction
+    @Query("SELECT * FROM Sale WHERE time >= :start AND time < :end ORDER BY time DESC, id DESC")
+    fun dailyReceipts(start: Long, end: Long): Flow<List<Receipt>>
     @Transaction @Query("SELECT * FROM Sale WHERE id = :id") suspend fun receipt(id: Long): Receipt?
     @Insert suspend fun addSale(sale: Sale): Long
     @Insert suspend fun addLines(lines: List<SaleLine>)
@@ -142,13 +143,6 @@ val indonesia = Locale("id", "ID")
 fun rupiah(amount: Long): String = "Rp" + NumberFormat.getIntegerInstance(indonesia).format(amount)
 fun ticket(id: Long): String = "TRX-" + id.toString().padStart(5, '0')
 fun dateLabel(time: Long): String = SimpleDateFormat("dd MMM yyyy • HH:mm", indonesia).format(time)
-fun startOfDay(): Long = Calendar.getInstance().apply {
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-}.timeInMillis
-
 fun Receipt.asText() = buildString {
     appendLine(sale.storeName)
     if (sale.storeAddress.isNotBlank()) appendLine(sale.storeAddress)

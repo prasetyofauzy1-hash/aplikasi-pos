@@ -6,7 +6,7 @@ Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat, t
 - Atur nama, alamat, dan logo melalui **Toko**. Identitas toko disalin ke setiap struk saat transaksi disimpan.
 - Gunakan **Produk** untuk menambah, mengubah, atau menghapus barang. Data contoh tersedia pada pemasangan pertama.
 - Pilih barang di **Kasir**, periksa keranjang, lalu catat pembayaran **Tunai** atau **QRIS**. QRIS hanya dicatat setelah Anda memeriksa pembayaran di luar aplikasi. Stok berkurang ketika transaksi berhasil disimpan.
-- Buka **Riwayat** untuk melihat ringkasan hari ini dan struk lama. **Bagikan struk** membuka menu berbagi Android; pilih WhatsApp jika terpasang. Struk yang dibagikan berupa teks.
+- Buka **Riwayat** dan pilih tanggal untuk melihat total penjualan, rincian Tunai dan QRIS, serta struk hari itu. Pilih **Produk terjual** untuk mencocokkan jumlah dan omzet per produk dengan catatan manual. **Bagikan struk** membuka menu berbagi Android; pilih WhatsApp jika terpasang. Struk yang dibagikan berupa teks.
 
 ## Pengembangan
 

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,7 +80,7 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 @Composable
 private fun RegisterApp(model: RegisterModel) {
     val products by model.products.collectAsStateWithLifecycle()
-    val sales by model.sales.collectAsStateWithLifecycle()
+    val historyState = rememberSaveableStateHolder()
     var tab by rememberSaveable { mutableStateOf(Tab.REGISTER) }
     var orderScreen by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -124,7 +125,7 @@ private fun RegisterApp(model: RegisterModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
-                receipt != null -> ReceiptScreen(receipt, closeSubScreen)
+                receipt != null -> ReceiptScreen(receipt, closeSubScreen, fromHistory = tab == Tab.HISTORY)
                 selectedId != null -> {
                     val product = if (selectedId == 0L) Product(name = "", category = "", price = 0, stock = 0)
                         else products.firstOrNull { it.id == selectedId }
@@ -140,7 +141,7 @@ private fun RegisterApp(model: RegisterModel) {
                 orderScreen == "payment" -> PaymentScreen(products, model, onPaid = { orderScreen = "" })
                 tab == Tab.REGISTER -> CashierScreen(products, model, onCart = { orderScreen = "cart" })
                 tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
-                tab == Tab.HISTORY -> HistoryScreen(sales, model)
+                tab == Tab.HISTORY -> historyState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
                 tab == Tab.SETTINGS -> SettingsScreen(model)
             }
         }

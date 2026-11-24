@@ -33,7 +33,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private val register = Register(database)
 
     val products = dao.products().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val sales = dao.sales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    internal fun dailyReceipts(period: ReportPeriod) = dao.dailyReceipts(period.start, period.end)
 
     var pinConfigured by mutableStateOf(preferences.contains("pinHash"))
         private set
