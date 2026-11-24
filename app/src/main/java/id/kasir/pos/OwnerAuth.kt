@@ -65,3 +65,9 @@ internal fun OwnerAccount.matches(linkedUid: String?) = linkedUid != null && uid
 
 internal fun ownerEmailsMatch(email: String, confirmation: String) =
     email.isNotBlank() && email.trim().equals(confirmation.trim(), ignoreCase = true)
+
+internal fun maskedOwnerEmail(email: String): String {
+    val at = email.lastIndexOf('@')
+    if (at <= 0 || at == email.lastIndex) return "****"
+    return email.take(minOf(2, at - 1)) + "****" + email.substring(at)
+}

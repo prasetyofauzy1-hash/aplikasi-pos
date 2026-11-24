@@ -158,11 +158,11 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         if (!verifyOwnerPin(pin)) throw SaleInputException("PIN salah. Coba lagi.")
     }
 
-    fun verifyOwnerForPinReset(password: String, onDone: () -> Unit) {
+    fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
-        val email = linkedOwnerEmail ?: return
         if (unlocked || !pinConfigured || resettingPin) return
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
+            val email = requireRecoveryEmail(enteredEmail)
             val account = withContext(Dispatchers.IO) { auth.authenticate(email, password, createAccount = false) }
             if (!account.matches(preferences.getString("ownerUid", null))) {
                 throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
@@ -172,13 +172,22 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun sendOwnerPasswordReset(onDone: () -> Unit) {
+    fun sendOwnerPasswordReset(enteredEmail: String, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
-        val email = linkedOwnerEmail ?: return
+        if (unlocked || !pinConfigured || resettingPin) return
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
+            val email = requireRecoveryEmail(enteredEmail)
             withContext(Dispatchers.IO) { auth.sendPasswordReset(email) }
             onDone()
         }
+    }
+
+    private fun requireRecoveryEmail(enteredEmail: String): String {
+        val email = linkedOwnerEmail
+        if (email == null || !ownerEmailsMatch(email, enteredEmail)) {
+            throw OwnerAuthException("Email tidak cocok dengan akun pemilik yang terhubung.")
+        }
+        return email
     }
 
     fun cancelPinReset() {

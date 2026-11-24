@@ -15,7 +15,15 @@ class OwnerAuthTest {
     @Test fun matchesOnlyTheConfirmedEmailIgnoringCaseAndOuterSpaces() {
         assertTrue(ownerEmailsMatch(" Owner@example.com ", "owner@example.com"))
         assertFalse(ownerEmailsMatch("owner@example.com", "ower@example.com"))
+        assertFalse(ownerEmailsMatch("owner@example.com", "ow****@example.com"))
         assertFalse(ownerEmailsMatch(" ", " "))
+    }
+
+    @Test fun masksTheLinkedAddressWithoutRevealingShortLocalParts() {
+        assertEquals("ow****@example.com", maskedOwnerEmail("owner@example.com"))
+        assertEquals("a****@example.com", maskedOwnerEmail("ab@example.com"))
+        assertEquals("****@example.com", maskedOwnerEmail("a@example.com"))
+        assertEquals("****", maskedOwnerEmail("invalid"))
     }
 
     @Test fun signsUpAndSignsInWithFirebase() {

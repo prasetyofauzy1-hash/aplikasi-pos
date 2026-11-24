@@ -329,7 +329,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         val email = model.linkedOwnerEmail
         if (model.emailAvailable || email != null) {
             if (email != null) {
-                Text("Email pemilik terhubung: $email", color = Muted, style = MaterialTheme.typography.bodyMedium)
+                Text("Email pemilik terhubung: ${maskedOwnerEmail(email)}", color = Muted, style = MaterialTheme.typography.bodyMedium)
             }
             OutlinedButton(onClick = onLinkOwner, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
                 Text(if (email == null) "Hubungkan email pemilik" else "Kelola email pemilik")

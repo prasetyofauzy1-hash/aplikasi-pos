@@ -115,27 +115,33 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
         return
     }
 
+    var enteredEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var resetSent by rememberSaveable { mutableStateOf(false) }
+    var resetSent by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = dismiss,
         title = { Text("Pulihkan akses pemilik") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Masuk dengan akun pemilik di bawah ini untuk membuat PIN baru tanpa menghapus data. Perlu internet.")
-                Text(email)
+                Text("Masukkan email lengkap dan kata sandi akun pemilik untuk membuat PIN baru tanpa menghapus data. Perlu internet.")
+                Text("Email terhubung: ${maskedOwnerEmail(email)}")
+                OwnerEmailField(enteredEmail, "Email pemilik", !model.busy) {
+                    enteredEmail = it
+                    resetSent = false
+                    model.clearError()
+                }
                 OwnerPasswordField(password, !model.busy) { password = it; model.clearError() }
                 ErrorText(model.error)
                 if (resetSent) Text("Periksa kotak masuk dan folder spam untuk tautan pengaturan ulang kata sandi.")
-                TextButton(enabled = !model.busy, onClick = {
+                TextButton(enabled = !model.busy && enteredEmail.isNotBlank(), onClick = {
                     resetSent = false
-                    model.sendOwnerPasswordReset { resetSent = true }
+                    model.sendOwnerPasswordReset(enteredEmail) { resetSent = true }
                 }) { Text("Kirim tautan atur ulang kata sandi") }
             }
         },
         confirmButton = {
-            TextButton(enabled = !model.busy && password.isNotEmpty(), onClick = {
-                model.verifyOwnerForPinReset(password, onDismiss)
+            TextButton(enabled = !model.busy && enteredEmail.isNotBlank() && password.isNotEmpty(), onClick = {
+                model.verifyOwnerForPinReset(enteredEmail, password, onDismiss)
             }) { Text(if (model.busy) "Memproses…" else "Masuk") }
         },
         dismissButton = { TextButton(onClick = dismiss, enabled = !model.busy) { Text("Batal") } }
