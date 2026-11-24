@@ -34,6 +34,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private val database = PosDatabase.open(app)
     private val dao = database.dao()
     private val register = Register(database)
+    private val ownerAuth = BuildConfig.FIREBASE_API_KEY.takeIf { it.isNotBlank() }?.let { OwnerAuth(it) }
 
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -45,6 +46,15 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var unlocked by mutableStateOf(false)
         private set
+    var firstUnlock by mutableStateOf(false)
+        private set
+    var initialOwnerEmailOffer by mutableStateOf(false)
+        private set
+    var linkedOwnerEmail by mutableStateOf(preferences.getString("ownerEmail", null))
+        private set
+    var resettingPin by mutableStateOf(false)
+        private set
+    val emailAvailable get() = ownerAuth != null
     var profile by mutableStateOf(StoreProfile(
         preferences.getString("name", null) ?: "Toko Saya",
         preferences.getString("address", null).orEmpty(),
@@ -60,40 +70,140 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun clearError() { error = null }
 
-    fun authenticate(pin: String, confirmation: String) {
+    fun authenticate(pin: String, confirmation: String, onRejected: () -> Unit) {
+        if (busy) return
+        val needsNewPin = !pinConfigured || resettingPin
         if (pin.length != 6 || !pin.all { it in '0'..'9' }) {
             error = "Masukkan PIN enam angka."
             return
         }
-        if (!pinConfigured && pin != confirmation) {
+        if (needsNewPin && pin != confirmation) {
             error = "Konfirmasi PIN tidak sama."
+            onRejected()
             return
         }
         runAction("PIN tidak dapat diperiksa.") {
-            val valid = withContext(Dispatchers.IO) {
-                if (pinConfigured) {
-                    verifyOwnerPin(pin)
-                } else {
-                    val salt = ByteArray(16).also(SecureRandom()::nextBytes)
-                    if (!preferences.edit()
-                            .putString("pinSalt", Base64.encodeToString(salt, Base64.NO_WRAP))
-                            .putString("pinHash", Base64.encodeToString(derivePin(pin, salt), Base64.NO_WRAP))
-                            .commit()) throw IOException()
-                    true
+            val valid = try {
+                withContext(Dispatchers.IO) {
+                    if (needsNewPin) {
+                        savePin(pin)
+                        true
+                    } else {
+                        verifyOwnerPin(pin)
+                    }
                 }
+            } catch (e: SaleInputException) {
+                onRejected()
+                throw e
             }
             if (valid) {
+                firstUnlock = !pinConfigured
+                initialOwnerEmailOffer = firstUnlock && emailAvailable && linkedOwnerEmail == null
                 pinConfigured = true
+                resettingPin = false
                 unlocked = true
             } else {
                 error = "PIN salah. Coba lagi."
+                onRejected()
             }
         }
+    }
+
+    private fun savePin(pin: String) {
+        val salt = ByteArray(16).also(SecureRandom()::nextBytes)
+        if (!preferences.edit()
+                .putString("pinSalt", Base64.encodeToString(salt, Base64.NO_WRAP))
+                .putString("pinHash", Base64.encodeToString(derivePin(pin, salt), Base64.NO_WRAP))
+                .remove("pinFailures").remove("pinUntilWall").remove("pinUntilElapsed").remove("pinBoot")
+                .commit()) throw IOException()
+    }
+
+    fun dismissInitialOwnerEmailOffer() {
+        initialOwnerEmailOffer = false
+    }
+
+    fun linkOwnerEmail(
+        pin: String, email: String, confirmation: String, password: String, createAccount: Boolean, onDone: () -> Unit
+    ) {
+        val auth = ownerAuth ?: return
+        if (!unlocked || busy) return
+        if (!ownerEmailsMatch(email, confirmation)) {
+            error = "Konfirmasi email tidak sama."
+            return
+        }
+        val requiresPin = !initialOwnerEmailOffer || linkedOwnerEmail != null
+        runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
+            linkedOwnerEmail = withContext(Dispatchers.IO) {
+                if (requiresPin) requireOwnerPin(pin)
+                val account = auth.authenticate(email.trim(), password, createAccount)
+                if (!preferences.edit().putString("ownerEmail", account.email)
+                        .putString("ownerUid", account.uid).commit()) throw IOException()
+                account.email
+            }
+            dismissInitialOwnerEmailOffer()
+            onDone()
+        }
+    }
+
+    fun unlinkOwnerEmail(pin: String, onDone: () -> Unit) {
+        if (!unlocked || linkedOwnerEmail == null) return
+        runAction("Tautan email tidak dapat dihapus. Coba lagi.") {
+            withContext(Dispatchers.IO) {
+                requireOwnerPin(pin)
+                if (!preferences.edit().remove("ownerEmail").remove("ownerUid").commit()) throw IOException()
+            }
+            linkedOwnerEmail = null
+            onDone()
+        }
+    }
+
+    private fun requireOwnerPin(pin: String) {
+        if (pin.length != 6 || !pin.all { it in '0'..'9' }) throw SaleInputException("Masukkan PIN enam angka.")
+        if (!verifyOwnerPin(pin)) throw SaleInputException("PIN salah. Coba lagi.")
+    }
+
+    fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
+        val auth = ownerAuth ?: return
+        if (unlocked || !pinConfigured || resettingPin) return
+        runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
+            val email = requireRecoveryEmail(enteredEmail)
+            val account = withContext(Dispatchers.IO) { auth.authenticate(email, password, createAccount = false) }
+            if (!account.matches(preferences.getString("ownerUid", null))) {
+                throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
+            }
+            resettingPin = true
+            onDone()
+        }
+    }
+
+    fun sendOwnerPasswordReset(enteredEmail: String, onDone: () -> Unit) {
+        val auth = ownerAuth ?: return
+        if (unlocked || !pinConfigured || resettingPin) return
+        runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
+            val email = requireRecoveryEmail(enteredEmail)
+            withContext(Dispatchers.IO) { auth.sendPasswordReset(email) }
+            onDone()
+        }
+    }
+
+    private fun requireRecoveryEmail(enteredEmail: String): String {
+        val email = linkedOwnerEmail
+        if (email == null || !ownerEmailsMatch(email, enteredEmail)) {
+            throw OwnerAuthException("Email tidak cocok dengan akun pemilik yang terhubung.")
+        }
+        return email
+    }
+
+    fun cancelPinReset() {
+        if (busy) return
+        resettingPin = false
+        clearError()
     }
 
     fun lock() {
         if (busy) return
         receipt = null
+        dismissInitialOwnerEmailOffer()
         clearError()
         unlocked = false
     }
@@ -269,6 +379,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 throw e
             } catch (e: SaleInputException) {
                 error = e.message
+            } catch (e: OwnerAuthException) {
+                error = e.message
             } catch (_: Exception) {
                 error = fallback
             } finally {
@@ -282,7 +394,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-private fun writeLogo(context: Context, uri: Uri): String {
+internal fun decodeStoreLogo(context: Context, uri: Uri): Bitmap {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException()
@@ -292,13 +404,20 @@ private fun writeLogo(context: Context, uri: Uri): String {
             inSampleSize *= 2
         }
     }
-    val bitmap = context.contentResolver.openInputStream(uri)?.use {
+    return context.contentResolver.openInputStream(uri)?.use {
         BitmapFactory.decodeStream(it, null, options)
     } ?: throw IOException()
+}
+
+private fun writeLogo(context: Context, uri: Uri): String {
+    val bitmap = decodeStoreLogo(context, uri)
     val file = File(context.filesDir, "logo-${UUID.randomUUID()}.png")
-    file.outputStream().use {
-        if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) throw IOException()
+    try {
+        file.outputStream().use {
+            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) throw IOException()
+        }
+    } finally {
+        bitmap.recycle()
     }
-    bitmap.recycle()
     return file.name
 }

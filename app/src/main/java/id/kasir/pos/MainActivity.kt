@@ -14,6 +14,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,13 +29,16 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,7 +92,10 @@ private fun RegisterApp(model: RegisterModel) {
     val sales by model.sales.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
     val products = remember(menu, cart) { availableCatalog(menu, cart) }
-    var tab by rememberSaveable { mutableStateOf(Tab.REGISTER) }
+    var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
+    var showEmailLink by rememberSaveable {
+        mutableStateOf(model.initialOwnerEmailOffer)
+    }
     var orderScreen by rememberSaveable { mutableStateOf("") }
     var cashierQuery by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -181,9 +188,20 @@ private fun RegisterApp(model: RegisterModel) {
                         ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
                     }
                     tab == Tab.HISTORY -> HistoryScreen(sales, model)
-                    tab == Tab.SETTINGS -> SettingsScreen(model)
+                    tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
+                        model.dismissInitialOwnerEmailOffer()
+                        model.clearError()
+                        showEmailLink = true
+                    })
                 }
             }
+        }
+    }
+    if (showEmailLink) {
+        LinkOwnerEmailDialog(model) {
+            model.dismissInitialOwnerEmailOffer()
+            model.clearError()
+            showEmailLink = false
         }
     }
 }
@@ -288,15 +306,28 @@ internal fun StoreLogo(logoName: String, modifier: Modifier) {
     val image = remember(logoName, context) {
         if (logoName.isBlank()) null else BitmapFactory.decodeFile(File(context.filesDir, logoName).path)?.asImageBitmap()
     }
-    if (image != null) Image(image, contentDescription = "Logo toko", modifier, contentScale = ContentScale.Crop)
+    if (image != null) Image(image, contentDescription = "Logo toko", modifier, contentScale = ContentScale.Fit)
     else Image(painterResource(R.drawable.ic_kasir), contentDescription = null, modifier)
 }
 
 @Composable
 private fun UnlockScreen(model: RegisterModel) {
-    var pin by remember { mutableStateOf("") }
-    var confirmation by remember { mutableStateOf("") }
-    val setup = !model.pinConfigured
+    val resetting = model.resettingPin
+    val setup = !model.pinConfigured || resetting
+    var pin by remember(resetting) { mutableStateOf("") }
+    var confirmation by remember(resetting) { mutableStateOf("") }
+    var showRecovery by rememberSaveable { mutableStateOf(false) }
+    val canSubmit = !model.busy && pin.length == 6 && (!setup || confirmation.length == 6)
+    val focus = LocalFocusManager.current
+    val submit: () -> Unit = {
+        if (canSubmit) {
+            focus.clearFocus()
+            model.authenticate(pin, confirmation) {
+                if (setup) confirmation = "" else pin = ""
+            }
+        }
+    }
+    BackHandler(enabled = resetting, onBack = model::cancelPinReset)
     Column(
         Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 22.dp),
@@ -312,28 +343,60 @@ private fun UnlockScreen(model: RegisterModel) {
         }
         Surface(shape = Shape, color = Color.White) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (setup) "Buat PIN pemilik" else "Masuk sebagai pemilik", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(if (setup) "Gunakan 6 angka untuk mengunci akses kasir di perangkat ini." else "Masukkan 6 angka PIN untuk membuka kasir.", color = Muted)
-                PinInput(pin, "PIN pemilik") { pin = it; model.clearError() }
-                if (setup) PinInput(confirmation, "Konfirmasi PIN") { confirmation = it; model.clearError() }
+                Text(when {
+                    resetting -> "Buat PIN baru"
+                    setup -> "Buat PIN pemilik"
+                    else -> "Masuk sebagai pemilik"
+                }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text(when {
+                    resetting -> "PIN baru menggantikan PIN lama. Data toko tetap tersimpan."
+                    setup -> "Pilih 6 angka yang mudah Anda ingat. PIN ini diperlukan setiap kali membuka kasir."
+                    else -> "Masukkan 6 angka PIN untuk membuka kasir."
+                }, color = Muted)
+                PinInput(pin, if (resetting) "PIN baru" else "PIN pemilik", !model.busy,
+                    isError = !setup && model.error != null, imeAction = if (setup) ImeAction.Next else ImeAction.Done,
+                    keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }, onDone = { submit() })
+                ) { pin = it; model.clearError() }
+                if (setup) PinInput(confirmation, "Konfirmasi PIN", !model.busy, isError = model.error != null,
+                    imeAction = ImeAction.Done, keyboardActions = KeyboardActions(onDone = { submit() })
+                ) { confirmation = it; model.clearError() }
                 ErrorText(model.error)
                 Button(
-                    onClick = { model.authenticate(pin, confirmation) },
-                    enabled = !model.busy && pin.length == 6 && (!setup || confirmation.length == 6),
+                    onClick = submit,
+                    enabled = canSubmit,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-                ) { Text(if (setup) "Buat PIN & mulai" else "Buka kasir") }
+                ) { Text(if (resetting) "Simpan PIN baru" else if (setup) "Buat PIN & mulai" else "Buka kasir") }
+                if (resetting) {
+                    TextButton(onClick = model::cancelPinReset, enabled = !model.busy) { Text("Batal") }
+                } else if (!setup) {
+                    TextButton(onClick = {
+                        model.clearError()
+                        showRecovery = true
+                    }, enabled = !model.busy) { Text("Lupa PIN?") }
+                }
             }
         }
         Text("DATA DISIMPAN DI PERANGKAT INI", modifier = Modifier.align(Alignment.CenterHorizontally),
             color = Muted, letterSpacing = 1.sp, style = MaterialTheme.typography.labelSmall)
     }
+    if (showRecovery) {
+        RecoverOwnerPinDialog(model) {
+            model.clearError()
+            showRecovery = false
+        }
+    }
 }
 
 @Composable
-private fun PinInput(value: String, label: String, change: (String) -> Unit) {
+private fun PinInput(
+    value: String, label: String, enabled: Boolean, isError: Boolean, imeAction: ImeAction,
+    keyboardActions: KeyboardActions, change: (String) -> Unit
+) {
     OutlinedTextField(value, { change(it.filter { c -> c in '0'..'9' }.take(6)) }, Modifier.fillMaxWidth(),
+        enabled = enabled, isError = isError,
         label = { Text(label) }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = imeAction),
+        keyboardActions = keyboardActions)
 }
 
 @Composable
