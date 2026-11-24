@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -24,6 +25,10 @@ internal class PrinterException(message: String) : Exception(message)
 internal const val printerPermissionMessage = "Izinkan akses perangkat di sekitar untuk menggunakan printer Bluetooth."
 private val printerService = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 private const val printTimeoutMillis = 12_000L
+private const val drainBytesPerSecond = 1_000L
+
+internal fun printerDrainMillis(byteCount: Int) =
+    (byteCount * 1_000L / drainBytesPerSecond).coerceIn(500L, 4_000L)
 
 internal fun hasPrinterPermission(context: Context) = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
     ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
@@ -53,22 +58,22 @@ internal suspend fun sendToPrinter(context: Context, printer: PairedPrinter, doc
                 val device = pairedBluetoothDevices(context).firstOrNull { it.address == printer.address }
                     ?: throw PrinterException("Printer tidak lagi dipasangkan. Pasangkan di Android, lalu pilih lagi di Toko.")
                 val bytes = document()
-                val socket = device.createRfcommSocketToServiceRecord(printerService)
-                suspendCancellableCoroutine<Unit> { continuation ->
-                    continuation.invokeOnCancellation { runCatching { socket.close() } }
-                    try {
-                        socket.use {
-                            it.connect()
-                            it.outputStream.apply {
+                device.createRfcommSocketToServiceRecord(printerService).use { socket ->
+                    suspendCancellableCoroutine<Unit> { continuation ->
+                        continuation.invokeOnCancellation { runCatching { socket.close() } }
+                        try {
+                            socket.connect()
+                            socket.outputStream.apply {
                                 write(bytes)
                                 flush()
                             }
+                        } catch (e: Exception) {
+                            continuation.resumeWithException(e)
+                            return@suspendCancellableCoroutine
                         }
-                    } catch (e: Exception) {
-                        continuation.resumeWithException(e)
-                        return@suspendCancellableCoroutine
+                        continuation.resume(Unit)
                     }
-                    continuation.resume(Unit)
+                    delay(printerDrainMillis(bytes.size))
                 }
             }
         }
