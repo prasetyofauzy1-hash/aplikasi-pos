@@ -138,14 +138,16 @@ internal fun encodeIngredientDeductions(deductions: Map<Long, Int>): String =
 
 internal suspend fun restoreSaleIngredients(
     snapshot: String?,
+    ingredientExists: suspend (ingredientId: Long) -> Boolean,
     restock: suspend (ingredientId: Long, quantity: Int) -> Int
 ) {
     if (snapshot == null) return
     val deductions = JSONObject(snapshot)
     for (key in deductions.keys()) {
+        val ingredientId = key.toLong()
         val quantity = deductions.getInt(key)
-        if (quantity !in 1..MAX_INGREDIENT_STOCK || restock(key.toLong(), quantity) != 1) {
-            throw SaleInputException("Stok bahan tidak dapat dikembalikan. Periksa apakah bahan masih tersedia dan stok tidak melebihi batas.")
+        if (quantity !in 1..MAX_INGREDIENT_STOCK || (restock(ingredientId, quantity) != 1 && ingredientExists(ingredientId))) {
+            throw SaleInputException("Stok bahan tidak dapat dikembalikan. Periksa apakah stok melebihi batas.")
         }
     }
 }

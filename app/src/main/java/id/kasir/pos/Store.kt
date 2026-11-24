@@ -144,6 +144,8 @@ interface PosDao {
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
     @Query("SELECT * FROM Ingredient ORDER BY name COLLATE NOCASE") fun ingredients(): Flow<List<Ingredient>>
+    @Query("SELECT EXISTS(SELECT 1 FROM Ingredient WHERE id = :id)")
+    suspend fun ingredientExists(id: Long): Boolean
     @Query("SELECT EXISTS(SELECT 1 FROM Ingredient WHERE name = :name AND id != :id)")
     suspend fun ingredientNameExists(name: String, id: Long): Boolean
     @Query("SELECT EXISTS(SELECT 1 FROM RecipeLine WHERE ingredientId = :ingredientId)")
@@ -404,7 +406,7 @@ class Register(private val db: PosDatabase) {
     suspend fun deleteSale(id: Long) {
         db.withTransaction {
             val sale = dao.sale(id) ?: throw SaleInputException("Transaksi tidak ditemukan.")
-            restoreSaleIngredients(sale.ingredientDeductions) { ingredientId, quantity ->
+            restoreSaleIngredients(sale.ingredientDeductions, dao::ingredientExists) { ingredientId, quantity ->
                 dao.restockIngredient(ingredientId, quantity, MAX_INGREDIENT_STOCK)
             }
             dao.deleteSale(id)

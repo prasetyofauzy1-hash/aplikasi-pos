@@ -40,7 +40,7 @@ class InventoryTest {
         val snapshot = encodeIngredientDeductions(checkedIngredientDemand(listOf(berryGo, smoothie), cart))
         val changedRecipe = menuItem(1, "Berry Go", berries to 100)
         val restored = mutableMapOf<Long, Int>()
-        restoreSaleIngredients(snapshot) { id, quantity ->
+        restoreSaleIngredients(snapshot, { true }) { id, quantity ->
             restored[id] = quantity
             1
         }
@@ -49,16 +49,29 @@ class InventoryTest {
     }
 
     @Test fun deletionDoesNotGuessAtStockForOldSalesOrSalesWithoutRecipes() = runBlocking {
-        restoreSaleIngredients(null) { _, _ -> error("A legacy sale must not use the current recipe") }
-        restoreSaleIngredients(encodeIngredientDeductions(emptyMap())) { _, _ -> error("No ingredients were deducted") }
+        restoreSaleIngredients(null, { true }) { _, _ -> error("A legacy sale must not use the current recipe") }
+        restoreSaleIngredients(encodeIngredientDeductions(emptyMap()), { true }) { _, _ -> error("No ingredients were deducted") }
     }
 
     @Test fun deletionFailsWhenADeductionCannotBeRestored() {
         assertThrows(SaleInputException::class.java) {
             runBlocking {
-                restoreSaleIngredients(encodeIngredientDeductions(mapOf(1L to 200))) { _, _ -> 0 }
+                restoreSaleIngredients(encodeIngredientDeductions(mapOf(1L to 200)), { true }) { _, _ -> 0 }
             }
         }
+    }
+
+    @Test fun deletionReturnsStockToRemainingIngredientsWhenOneWasDeleted() = runBlocking {
+        val stock = mutableMapOf(berries.id to 400)
+        val snapshot = encodeIngredientDeductions(mapOf(banana.id to 200, berries.id to 200))
+        restoreSaleIngredients(snapshot, stock::containsKey) { id, quantity ->
+            val current = stock[id]
+            if (current == null) 0 else {
+                stock[id] = current + quantity
+                1
+            }
+        }
+        assertEquals(mapOf(berries.id to 600), stock)
     }
 
     @Test fun rejectsAnOrderThatIndividuallyFitsButTogetherRunsOut() {
