@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -22,7 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -215,7 +213,9 @@ internal fun ReceiptScreen(receipt: Receipt, onDone: () -> Unit) {
             Column(Modifier.fillMaxWidth().padding(19.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    StoreLogo(sale.logoName, Modifier.size(width = 112.dp, height = 54.dp).clip(RoundedCornerShape(15.dp)))
+                    val logoSize = if (sale.logoName.isBlank()) Modifier.size(54.dp)
+                        else Modifier.size(width = 128.dp, height = 88.dp)
+                    StoreLogo(sale.logoName, logoSize)
                     Text(sale.storeName, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     if (sale.storeAddress.isNotBlank()) Text(sale.storeAddress, textAlign = TextAlign.Center, color = Muted)
                     Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.bodySmall)
@@ -276,7 +276,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
             Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                val logoModifier = Modifier.size(60.dp).clip(RoundedCornerShape(13.dp))
+                val logoModifier = Modifier.size(72.dp)
                 if (image != null) Image(image, "Pratinjau logo toko", logoModifier, contentScale = ContentScale.Fit)
                 else StoreLogo(if (removeLogo || selection != null) "" else profile.logoName, logoModifier)
                 Column(Modifier.weight(1f)) {
