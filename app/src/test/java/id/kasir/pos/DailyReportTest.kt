@@ -60,4 +60,35 @@ class DailyReportTest {
     @Test fun emptyDayHasNoSalesOrProductsAndZeroRevenue() {
         assertEquals(DailyReport(emptyList(), 0, emptyMap(), emptyList()), dailyReport(emptyList()))
     }
+
+    @Test fun sameNameAndPriceStaySeparateByIdWhilePriceAndNameChangesDoNotSplitAProduct() {
+        val early = Sale(id = 1, time = 1, total = 30_000, paid = 30_000, method = Payment.CASH.label,
+            storeName = "Jus.go", storeAddress = "", logoName = "")
+        val later = early.copy(id = 2, time = 2, total = 32_000, paid = 32_000)
+        val report = dailyReport(listOf(
+            Receipt(early, listOf(SaleLine(saleId = 1, productName = "Berry Lama", unitPrice = 15_000, quantity = 2, productId = 7))),
+            Receipt(later, listOf(
+                SaleLine(saleId = 2, productName = "Berry Go", unitPrice = 16_000, quantity = 1, productId = 7),
+                SaleLine(saleId = 2, productName = "Berry Go", unitPrice = 16_000, quantity = 1, productId = 8)
+            ))
+        ))
+
+        assertEquals(listOf(ProductSales("Berry Go", 3, 46_000, 7, 16_000), ProductSales("Berry Go", 1, 16_000, 8, 16_000)), report.products)
+        assertEquals(listOf("Harga terakhir Rp16.000 · #7", "Harga terakhir Rp16.000 · #8"), report.products.map { it.duplicateNameDetail })
+        assertEquals(report.total, report.products.sumOf { it.revenue })
+    }
+
+    @Test fun legacyLinesUseRecordedNameButNeverMergeWithAnIdentifiedProduct() {
+        val sale = Sale(id = 1, time = 1, total = 46_000, paid = 46_000, method = Payment.QRIS.label,
+            storeName = "Jus.go", storeAddress = "", logoName = "")
+        val report = dailyReport(listOf(Receipt(sale, listOf(
+            SaleLine(saleId = 1, productName = "Berry Go", unitPrice = 15_000, quantity = 1),
+            SaleLine(saleId = 1, productName = "Berry Go", unitPrice = 16_000, quantity = 1),
+            SaleLine(saleId = 1, productName = "Berry Go", unitPrice = 15_000, quantity = 1, productId = 7)
+        ))))
+
+        assertEquals(listOf(ProductSales("Berry Go", 2, 31_000), ProductSales("Berry Go", 1, 15_000, 7, 15_000)), report.products)
+        assertEquals("Catatan lama (tanpa kode produk)", report.products.first().duplicateNameDetail)
+        assertEquals(report.total, report.products.sumOf { it.revenue })
+    }
 }

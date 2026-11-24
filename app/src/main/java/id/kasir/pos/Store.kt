@@ -59,7 +59,8 @@ data class SaleLine(
     val saleId: Long,
     val productName: String,
     val unitPrice: Long,
-    val quantity: Int
+    val quantity: Int,
+    val productId: Long? = null
 )
 
 data class Receipt(@Embedded val sale: Sale, @Relation(parentColumn = "id", entityColumn = "saleId") val lines: List<SaleLine>)
@@ -106,11 +107,17 @@ interface PosDao {
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
-@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class], version = 3)
+@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class], version = 4)
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addSaleLineProductId = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE SaleLine ADD COLUMN productId INTEGER")
+            }
+        }
+
         private val addIngredients = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS Ingredient (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL COLLATE NOCASE, unit TEXT NOT NULL, stock INTEGER NOT NULL)")
@@ -130,7 +137,7 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients)
+            .addMigrations(addCart, addIngredients, addSaleLineProductId)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     listOf(
@@ -176,7 +183,7 @@ fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Pa
     val lines = cart.map { (id, qty) ->
         val item = byId[id] ?: throw SaleInputException("Ada produk yang sudah dihapus. Perbarui keranjang.")
         if (qty <= 0 || qty > item.stock) throw SaleInputException("Stok ${item.name} tidak mencukupi.")
-        SaleLine(saleId = 0, productName = item.name, unitPrice = item.price, quantity = qty)
+        SaleLine(saleId = 0, productName = item.name, unitPrice = item.price, quantity = qty, productId = item.id)
     }
     val total = lines.sumOf { it.unitPrice * it.quantity }
     val paid = if (payment == Payment.QRIS) total else cash ?: 0

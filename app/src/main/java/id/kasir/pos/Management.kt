@@ -292,6 +292,9 @@ internal fun HistoryScreen(model: RegisterModel) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
+    val duplicateProductNames = remember(report.products) {
+        report.products.groupingBy { it.name.lowercase(indonesia) }.eachCount().filterValues { it > 1 }.keys
+    }
     LazyColumn(
         Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp), state = listState
@@ -322,13 +325,18 @@ internal fun HistoryScreen(model: RegisterModel) {
         if (report.sales.isEmpty()) {
             item { EmptyPanel("Tidak ada transaksi", "Tidak ada penjualan pada tanggal ini.") }
         } else if (showProducts) {
-            items(report.products, key = { it.name }) { product ->
+            items(report.products, key = { it.key }) { product ->
                 Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
                     Row(
                         Modifier.fillMaxWidth().padding(14.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(product.name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        Column(Modifier.weight(1f)) {
+                            Text(product.name, fontWeight = FontWeight.Bold)
+                            if (product.name.lowercase(indonesia) in duplicateProductNames) {
+                                Text(product.duplicateNameDetail, color = Muted, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(rupiah(product.revenue), color = Pine, fontWeight = FontWeight.Bold)
                             Text("${product.quantity} terjual", color = Muted, style = MaterialTheme.typography.labelSmall)
