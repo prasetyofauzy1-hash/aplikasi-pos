@@ -1,5 +1,10 @@
 package id.kasir.pos
 
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,11 +15,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,12 +33,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.util.TimeZone
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -155,21 +168,117 @@ internal fun ProductForm(product: Product, model: RegisterModel, onClose: () -> 
 }
 
 @Composable
-internal fun HistoryScreen(sales: List<Sale>, model: RegisterModel) {
-    val day = startOfDay()
-    val todays = sales.filter { it.time >= day }
+private fun rememberReportClock(): State<Pair<Long, TimeZone>> {
+    val context = LocalContext.current
+    fun currentDay(): Pair<Long, TimeZone> {
+        val zone = TimeZone.getDefault()
+        return reportDate(System.currentTimeMillis(), zone) to zone
+    }
+    return produceState(currentDay(), context) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                value = currentDay()
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_DATE_CHANGED)
+            addAction(Intent.ACTION_TIME_CHANGED)
+            addAction(Intent.ACTION_TIMEZONE_CHANGED)
+        }
+        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        value = currentDay()
+        awaitDispose { context.unregisterReceiver(receiver) }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReportDateControls(date: Long, today: Long, onSelect: (Long) -> Unit) {
+    var choosingDate by rememberSaveable { mutableStateOf(false) }
+    if (choosingDate) {
+        val picker = remember(date) { DatePickerState(locale = indonesia, initialSelectedDateMillis = date) }
+        val configuration = LocalConfiguration.current
+        val localized = remember(configuration) { Configuration(configuration).apply { setLocale(indonesia) } }
+        DatePickerDialog(
+            onDismissRequest = { choosingDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    picker.selectedDateMillis?.let(onSelect)
+                    choosingDate = false
+                }) { Text("Pilih") }
+            },
+            dismissButton = { TextButton(onClick = { choosingDate = false }) { Text("Batal") } }
+        ) {
+            CompositionLocalProvider(LocalConfiguration provides localized) {
+                DatePicker(
+                    state = picker,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    title = { Text("Pilih tanggal", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) },
+                    headline = {
+                        Text(
+                            picker.selectedDateMillis?.let(::reportDateLabel).orEmpty(),
+                            modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                    },
+                    showModeToggle = false
+                )
+            }
+        }
+    }
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onSelect(moveReportDate(date, -1)) }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Hari sebelumnya")
+            }
+            OutlinedButton(onClick = { choosingDate = true }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Default.DateRange, contentDescription = "Pilih tanggal", modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(reportDateLabel(date))
+            }
+            IconButton(onClick = { onSelect(moveReportDate(date, 1)) }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Hari berikutnya")
+            }
+        }
+        if (date != today) {
+            TextButton(onClick = { onSelect(today) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text("Kembali ke hari ini")
+            }
+        }
+    }
+}
+
+@Composable
+internal fun HistoryScreen(model: RegisterModel) {
+    val (today, zone) = rememberReportClock().value
+    var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showProducts by rememberSaveable { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val date = selectedDate ?: today
+    val period = remember(date, zone) { reportPeriod(date, zone) }
+    val report = key(period) {
+        val receipts by remember(model, period) { model.dailyReceipts(period) }
+            .collectAsStateWithLifecycle(initialValue = null)
+        remember(receipts) { receipts?.let(::dailyReport) }
+    }
+    if (report == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        return
+    }
     LazyColumn(
         Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp), state = listState
     ) {
-        item { Header("03  /  LAPORAN PENJUALAN", "Riwayat", "Lihat pemasukan harian dan buka kembali struk.") }
+        item { Header("03  /  LAPORAN PENJUALAN", "Riwayat", "Cocokkan penjualan harian dan buka kembali struk.") }
+        item { ReportDateControls(date, today) { selectedDate = it.takeUnless { it == today } } }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TotalBanner("Penjualan hari ini  •  ${todays.size} transaksi", todays.sumOf { it.total })
+                val label = if (date == today) "Penjualan hari ini" else "Penjualan harian"
+                TotalBanner("$label  •  ${report.sales.size} transaksi", report.total)
                 Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Payment.entries.forEach { method ->
-                            MetricRow(method.label, rupiah(todays.filter { it.method == method.label }.sumOf { it.total }))
+                            MetricRow(method.label, rupiah(report.totalsByPayment[method.label] ?: 0L))
                         }
                     }
                 }
@@ -177,11 +286,30 @@ internal fun HistoryScreen(sales: List<Sale>, model: RegisterModel) {
             }
         }
         item {
-            Text("Semua transaksi", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(!showProducts, onClick = { showProducts = false }, label = { Text("Transaksi") })
+                FilterChip(showProducts, onClick = { showProducts = true }, label = { Text("Produk terjual") })
+            }
             ErrorText(model.error)
         }
-        if (sales.isEmpty()) item { EmptyPanel("Belum ada transaksi", "Penjualan yang disimpan akan muncul di sini.") }
-        items(sales, key = { it.id }) { sale ->
+        if (report.sales.isEmpty()) {
+            item { EmptyPanel("Tidak ada transaksi", "Tidak ada penjualan pada tanggal ini.") }
+        } else if (showProducts) {
+            items(report.products, key = { it.name }) { product ->
+                Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(product.name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(rupiah(product.revenue), color = Pine, fontWeight = FontWeight.Bold)
+                            Text("${product.quantity} terjual", color = Muted, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        } else items(report.sales, key = { it.id }) { sale ->
             Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
                 Row(
                     Modifier.fillMaxWidth().clickable(enabled = !model.busy) { model.openReceipt(sale.id) }.padding(14.dp),
@@ -209,7 +337,7 @@ internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        EmptyPanel("✓  Transaksi tersimpan", "${ticket(sale.id)}  •  ${sale.method}")
+        EmptyPanel(if (fromCheckout) "✓  Transaksi tersimpan" else "Struk tersimpan", "${ticket(sale.id)}  •  ${sale.method}")
         Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
             Column(Modifier.fillMaxWidth().padding(19.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
@@ -238,7 +366,7 @@ internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -
         if (fromCheckout) {
             TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Transaksi baru") }
         } else {
-            OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Selesai") }
+            OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Kembali ke riwayat") }
         }
     }
 }
