@@ -66,14 +66,13 @@ data class Receipt(@Embedded val sale: Sale, @Relation(parentColumn = "id", enti
 
 @Dao
 interface PosDao {
-    @Query("SELECT * FROM Product ORDER BY name COLLATE NOCASE") fun products(): Flow<List<Product>>
-    @Query("SELECT * FROM Product WHERE id IN (:ids)") suspend fun byId(ids: Set<Long>): List<Product>
-    @Insert suspend fun add(product: Product)
+    @Transaction @Query("SELECT * FROM Product ORDER BY name COLLATE NOCASE") fun menu(): Flow<List<MenuItem>>
+    @Transaction @Query("SELECT * FROM Product WHERE id IN (:ids)") suspend fun menuById(ids: Set<Long>): List<MenuItem>
+    @Insert suspend fun add(product: Product): Long
     @Update suspend fun update(product: Product)
     @Query("DELETE FROM Product WHERE id = :id") suspend fun delete(id: Long)
     @Query("SELECT * FROM CartItem") fun cart(): Flow<List<CartItem>>
     @Query("SELECT * FROM CartItem") suspend fun cartSnapshot(): List<CartItem>
-    @Query("SELECT quantity FROM CartItem WHERE productId = :id") suspend fun cartQuantity(id: Long): Int?
     @Upsert suspend fun putCartItem(item: CartItem)
     @Query("DELETE FROM CartItem WHERE productId = :id") suspend fun removeCartItem(id: Long)
     @Query("UPDATE CartItem SET quantity = MIN(quantity, :stock) WHERE productId = :id")
@@ -81,6 +80,21 @@ interface PosDao {
     @Query("DELETE FROM CartItem") suspend fun clearCart()
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
+    @Query("SELECT * FROM Ingredient ORDER BY name COLLATE NOCASE") fun ingredients(): Flow<List<Ingredient>>
+    @Query("SELECT EXISTS(SELECT 1 FROM Ingredient WHERE name = :name AND id != :id)")
+    suspend fun ingredientNameExists(name: String, id: Long): Boolean
+    @Query("SELECT EXISTS(SELECT 1 FROM RecipeLine WHERE ingredientId = :ingredientId)")
+    suspend fun ingredientInUse(ingredientId: Long): Boolean
+    @Insert suspend fun addIngredient(ingredient: Ingredient)
+    @Query("UPDATE Ingredient SET name = :name, stock = :stock WHERE id = :id")
+    suspend fun updateIngredient(id: Long, name: String, stock: Int)
+    @Query("DELETE FROM Ingredient WHERE id = :id") suspend fun deleteIngredient(id: Long)
+    @Query("UPDATE Ingredient SET stock = stock + :quantity WHERE id = :id AND stock <= :maxStock - :quantity")
+    suspend fun restockIngredient(id: Long, quantity: Int, maxStock: Int): Int
+    @Query("UPDATE Ingredient SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
+    suspend fun decrementIngredient(id: Long, quantity: Int): Int
+    @Query("DELETE FROM RecipeLine WHERE productId = :productId") suspend fun deleteRecipe(productId: Long)
+    @Insert suspend fun addRecipe(recipe: List<RecipeLine>)
     @Transaction
     @Query("SELECT * FROM Sale WHERE time >= :start AND time < :end ORDER BY time DESC, id DESC")
     fun dailyReceipts(start: Long, end: Long): Flow<List<Receipt>>
@@ -92,11 +106,20 @@ interface PosDao {
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
-@Database(entities = [Product::class, Sale::class, SaleLine::class, CartItem::class], version = 2)
+@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class], version = 3)
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addIngredients = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS Ingredient (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, name TEXT NOT NULL COLLATE NOCASE, unit TEXT NOT NULL, stock INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_Ingredient_name ON Ingredient (name)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS RecipeLine (productId INTEGER NOT NULL, ingredientId INTEGER NOT NULL, quantity INTEGER NOT NULL, PRIMARY KEY (productId, ingredientId), FOREIGN KEY (productId) REFERENCES Product (id) ON UPDATE NO ACTION ON DELETE CASCADE, FOREIGN KEY (ingredientId) REFERENCES Ingredient (id) ON UPDATE NO ACTION ON DELETE RESTRICT)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_RecipeLine_ingredientId ON RecipeLine (ingredientId)")
+            }
+        }
+
         private val addCart = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -107,19 +130,30 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart)
+            .addMigrations(addCart, addIngredients)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     listOf(
-                        Product(name = "Air Mineral", category = "Minuman", price = 4000, stock = 40),
-                        Product(name = "Keripik Singkong", category = "Camilan", price = 8000, stock = 15),
-                        Product(name = "Kopi Susu", category = "Minuman", price = 15000, stock = 24),
-                        Product(name = "Roti Cokelat", category = "Makanan", price = 9000, stock = 18),
-                        Product(name = "Teh Melati", category = "Minuman", price = 7000, stock = 25),
-                        Product(name = "Wafer Keju", category = "Camilan", price = 6000, stock = 6)
+                        Product(1, "Berry Go", "Jus", 20000, 0),
+                        Product(2, "Pisang Susu", "Smoothie", 18000, 0),
+                        Product(3, "Jeruk Segar", "Jus", 15000, 0)
                     ).forEach {
-                        db.execSQL("INSERT INTO Product (name, category, price, stock) VALUES (?, ?, ?, ?)",
-                            arrayOf(it.name, it.category, it.price, it.stock))
+                        db.execSQL("INSERT INTO Product (id, name, category, price, stock) VALUES (?, ?, ?, ?, ?)",
+                            arrayOf<Any>(it.id, it.name, it.category, it.price, it.stock))
+                    }
+                    listOf(
+                        Ingredient(1, "Berry", "g", 0), Ingredient(2, "Pisang", "g", 0),
+                        Ingredient(3, "Susu", "ml", 0), Ingredient(4, "Jeruk", "g", 0)
+                    ).forEach {
+                        db.execSQL("INSERT INTO Ingredient (id, name, unit, stock) VALUES (?, ?, ?, ?)",
+                            arrayOf<Any>(it.id, it.name, it.unit, it.stock))
+                    }
+                    listOf(
+                        RecipeLine(1, 1, 200), RecipeLine(1, 2, 200), RecipeLine(2, 2, 200),
+                        RecipeLine(2, 3, 150), RecipeLine(3, 4, 250)
+                    ).forEach {
+                        db.execSQL("INSERT INTO RecipeLine (productId, ingredientId, quantity) VALUES (?, ?, ?)",
+                            arrayOf<Any>(it.productId, it.ingredientId, it.quantity))
                     }
                 }
             }).build()
@@ -158,13 +192,22 @@ class Register(private val db: PosDatabase) {
             if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
                 throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
             }
-            val order = calculateCheckout(dao.byId(cart.keys), cart, payment, cash)
+            val menu = dao.menuById(cart.keys)
+            val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash)
             if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
+            val ingredients = checkedIngredientDemand(menu, cart)
             val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
                 method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName)
             val id = dao.addSale(sale)
-            cart.forEach { (productId, qty) ->
-                if (dao.decrement(productId, qty) != 1) throw SaleInputException("Stok berubah. Periksa keranjang.")
+            for (item in menu.filter { it.recipe.isEmpty() }) {
+                if (dao.decrement(item.product.id, cart.getValue(item.product.id)) != 1) {
+                    throw SaleInputException("Stok berubah. Periksa keranjang.")
+                }
+            }
+            for ((ingredientId, quantity) in ingredients) {
+                if (dao.decrementIngredient(ingredientId, quantity) != 1) {
+                    throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
+                }
             }
             val lines = order.lines.map { it.copy(saleId = id) }
             dao.addLines(lines)

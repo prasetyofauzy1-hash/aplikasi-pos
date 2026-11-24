@@ -36,7 +36,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private val register = Register(database)
     private val ownerAuth = BuildConfig.FIREBASE_API_KEY.takeIf { it.isNotBlank() }?.let { OwnerAuth(it) }
 
-    val products = dao.products().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -257,11 +258,16 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 database.withTransaction {
-                    val old = dao.cartQuantity(product.id)
+                    val previous = dao.cartSnapshot().associate { it.productId to it.quantity }
+                    val old = previous[product.id]
                     val next = quantity(old ?: 0)
                     if (next !in 0L..Int.MAX_VALUE.toLong()) return@withTransaction
-                    val previous = if (old == null) emptyMap() else mapOf(product.id to old)
-                    val updated = updateCartQuantity(previous, product, next.toInt())[product.id]
+                    val available = if (next > (old ?: 0)) {
+                        val items = dao.menuById(previous.keys + product.id)
+                        items.firstOrNull { it.product.id == product.id }
+                            ?.availableStock(ingredientDemand(items, previous), old ?: 0) ?: 0
+                    } else product.stock
+                    val updated = updateCartQuantity(previous, product.copy(stock = available), next.toInt())[product.id]
                     if (updated == old) return@withTransaction
                     if (updated == null) dao.removeCartItem(product.id)
                     else dao.putCartItem(CartItem(product.id, updated))
@@ -274,13 +280,52 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun saveProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
+    fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
         database.withTransaction {
-            if (product.id == 0L) dao.add(product) else {
-                dao.update(product)
+            if (recipe.isEmpty() && (product.id == 0L || dao.menuById(setOf(product.id)).any { it.recipe.isNotEmpty() })) {
+                throw SaleInputException("Tambahkan setidaknya satu bahan ke resep.")
+            }
+            if (recipe.values.any { it !in 1..MAX_INGREDIENT_STOCK }) {
+                throw SaleInputException("Jumlah setiap bahan harus lebih dari 0.")
+            }
+            val storedProduct = if (recipe.isEmpty()) product else product.copy(stock = 0)
+            val id = if (product.id == 0L) dao.add(storedProduct) else {
+                dao.update(storedProduct)
+                product.id
+            }
+            dao.deleteRecipe(id)
+            if (recipe.isNotEmpty()) {
+                dao.addRecipe(recipe.map { (ingredientId, quantity) -> RecipeLine(id, ingredientId, quantity) })
+            } else {
                 if (product.stock == 0) dao.removeCartItem(product.id)
                 else dao.capCartQuantity(product.id, product.stock)
             }
+        }
+        onDone()
+    }
+
+    fun saveIngredient(ingredient: Ingredient, onDone: () -> Unit) = runAction("Bahan tidak dapat disimpan.") {
+        database.withTransaction {
+            if (dao.ingredientNameExists(ingredient.name, ingredient.id)) {
+                throw SaleInputException("Nama bahan sudah dipakai.")
+            }
+            if (ingredient.id == 0L) dao.addIngredient(ingredient)
+            else dao.updateIngredient(ingredient.id, ingredient.name, ingredient.stock)
+        }
+        onDone()
+    }
+
+    fun deleteIngredient(id: Long, onDone: () -> Unit) = runAction("Bahan tidak dapat dihapus.") {
+        database.withTransaction {
+            if (dao.ingredientInUse(id)) throw SaleInputException("Bahan masih dipakai dalam resep.")
+            dao.deleteIngredient(id)
+        }
+        onDone()
+    }
+
+    fun restockIngredient(id: Long, quantity: Int, onDone: () -> Unit) = runAction("Stok tidak dapat ditambah.") {
+        if (quantity !in 1..MAX_INGREDIENT_STOCK || dao.restockIngredient(id, quantity, MAX_INGREDIENT_STOCK) != 1) {
+            throw SaleInputException("Periksa jumlah tambahan dan stok saat ini.")
         }
         onDone()
     }

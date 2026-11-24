@@ -1,8 +1,11 @@
 package id.kasir.pos
 
+internal fun canSetCartQuantity(current: Int, quantity: Int, stock: Int): Boolean =
+    quantity > 0 && (quantity <= stock || quantity < current)
+
 internal fun updateCartQuantity(cart: Map<Long, Int>, product: Product, quantity: Int): Map<Long, Int> = when {
     quantity == 0 -> cart - product.id
-    quantity in 1..product.stock -> cart + (product.id to quantity)
+    canSetCartQuantity(cart[product.id] ?: 0, quantity, product.stock) -> cart + (product.id to quantity)
     else -> cart
 }
 

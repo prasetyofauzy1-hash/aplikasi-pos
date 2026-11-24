@@ -176,12 +176,14 @@ internal fun CartScreen(products: List<Product>, cart: Map<Long, Int>, model: Re
     val listed = products.filter { it.id in cart }
     val count = cartItemCount(cart)
     val total = cartTotal(products, cart)
+    val stockIssue = cartStockIssue(products, cart)
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
                 if (short) Text("$count barang", fontWeight = FontWeight.Bold)
                 else Header("02  /  PERIKSA PESANAN", "Keranjang", "$count barang untuk transaksi ini.")
                 ErrorText(model.error)
+                ErrorText(stockIssue)
             }
             if (listed.isEmpty()) item { EmptyPanel("Belum ada barang", "Kembali ke kasir dan pilih produk.") }
             items(listed, key = { it.id }) { product ->
@@ -215,7 +217,7 @@ internal fun CartScreen(products: List<Product>, cart: Map<Long, Int>, model: Re
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (!short) TotalBanner("Total pesanan", total)
-            Button(onClick = onPay, enabled = listed.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+            Button(onClick = onPay, enabled = listed.isNotEmpty() && stockIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
                 Text("Lanjut ke pembayaran")
             }
         }
@@ -236,7 +238,7 @@ private fun QuantityDialog(product: Product, quantity: Int, onDismiss: () -> Uni
         mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
     }
     val entered = input.text.toIntOrNull()
-    val valid = entered != null && entered in 1..product.stock
+    val valid = entered != null && canSetCartQuantity(quantity, entered, product.stock)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ubah jumlah") },
@@ -271,6 +273,7 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
     val total = cartTotal(products, cart)
+    val stockIssue = cartStockIssue(products, cart)
     val cash = parseRupiah(amount, maxDigits = 18)
     val focusManager = LocalFocusManager.current
     val setCash: (Long) -> Unit = {
@@ -283,6 +286,10 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("03  /  SELESAIKAN TRANSAKSI", "Pembayaran", "Catat pembayaran yang diterima dari pelanggan.")
+        if (stockIssue != null || cart.isEmpty()) {
+            EmptyPanel("Pembayaran belum tersedia", stockIssue ?: "Keranjang masih kosong.")
+            return@Column
+        }
         TotalBanner("Total yang harus dibayar", total)
         Text("Metode pembayaran", fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

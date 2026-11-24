@@ -88,9 +88,10 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 
 @Composable
 private fun RegisterApp(model: RegisterModel) {
-    val products by model.products.collectAsStateWithLifecycle()
+    val menu by model.menu.collectAsStateWithLifecycle()
+    val ingredients by model.ingredients.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
-    val historyState = rememberSaveableStateHolder()
+    val products = remember(menu, cart) { availableCatalog(menu, cart) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     var showEmailLink by rememberSaveable {
         mutableStateOf(model.initialOwnerEmailOffer)
@@ -99,19 +100,24 @@ private fun RegisterApp(model: RegisterModel) {
     var cashierQuery by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedId = editingId
+    var showIngredients by rememberSaveable { mutableStateOf(false) }
+    var editingIngredient by rememberSaveable { mutableStateOf<Long?>(null) }
+    val tabState = rememberSaveableStateHolder()
     val receipt = model.receipt
     val closeSubScreen: () -> Unit = {
         if (!model.busy) {
             when {
                 receipt != null -> model.closeReceipt()
                 selectedId != null -> editingId = null
+                editingIngredient != null -> editingIngredient = null
+                showIngredients -> showIngredients = false
                 orderScreen == "payment" -> orderScreen = "cart"
                 else -> orderScreen = ""
             }
             model.clearError()
         }
     }
-    val main = receipt == null && orderScreen.isEmpty() && selectedId == null
+    val main = receipt == null && orderScreen.isEmpty() && selectedId == null && !showIngredients
     BackHandler(enabled = !main, onBack = closeSubScreen)
     val selectTab: (Tab) -> Unit = { selected ->
         if (!model.busy) {
@@ -137,6 +143,8 @@ private fun RegisterApp(model: RegisterModel) {
                 title = when {
                     receipt != null -> "Struk transaksi"
                     selectedId != null -> if (selectedId == 0L) "Tambah produk" else "Edit produk"
+                    editingIngredient != null -> if (editingIngredient == 0L) "Tambah bahan" else "Edit bahan"
+                    showIngredients -> "Stok bahan"
                     orderScreen == "payment" -> "Pembayaran"
                     else -> "Keranjang"
                 },
@@ -145,16 +153,28 @@ private fun RegisterApp(model: RegisterModel) {
                 when {
                     receipt != null -> ReceiptScreen(receipt, fromCheckout = tab == Tab.REGISTER, onDone = closeSubScreen)
                     selectedId != null -> {
-                        val product = if (selectedId == 0L) Product(name = "", category = "", price = 0, stock = 0)
-                            else products.firstOrNull { it.id == selectedId }
-                        if (product != null) key(selectedId) {
-                            ProductForm(product, model, onClose = { editingId = null })
+                        val item = if (selectedId == 0L) MenuItem(Product(name = "", category = "", price = 0, stock = 0), emptyList())
+                            else menu.firstOrNull { it.product.id == selectedId }
+                        if (item != null) key(selectedId) {
+                            ProductForm(item, ingredients, model, onClose = { editingId = null })
                         } else {
                             Box(Modifier.padding(20.dp)) {
                                 EmptyPanel("Produk tidak tersedia", "Kembali ke daftar dan buka produk lagi.")
                             }
                         }
                     }
+                    editingIngredient != null -> {
+                        val ingredient = if (editingIngredient == 0L) Ingredient(name = "", unit = ingredientUnits.first(), stock = 0)
+                            else ingredients.firstOrNull { it.id == editingIngredient }
+                        if (ingredient != null) key(ingredient.id) {
+                            IngredientForm(ingredient, model, onClose = { editingIngredient = null })
+                        } else {
+                            Box(Modifier.padding(20.dp)) {
+                                EmptyPanel("Bahan tidak tersedia", "Kembali ke daftar dan buka bahan lagi.")
+                            }
+                        }
+                    }
+                    showIngredients -> IngredientStockScreen(ingredients, model, onEdit = { editingIngredient = it })
                     orderScreen == "cart" -> CartScreen(products, cart, model, short, onPay = { orderScreen = "payment" })
                     orderScreen == "payment" -> PaymentScreen(products, cart, model, onPaid = {
                         cashierQuery = ""
@@ -164,8 +184,10 @@ private fun RegisterApp(model: RegisterModel) {
                         products, cart, model, cashierQuery, onQueryChange = { cashierQuery = it },
                         compact = short || narrow, searching = imeVisible, onCart = { orderScreen = "cart" }
                     )
-                    tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
-                    tab == Tab.HISTORY -> historyState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
+                    tab == Tab.PRODUCTS -> tabState.SaveableStateProvider(Tab.PRODUCTS.name) {
+                        ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
+                    }
+                    tab == Tab.HISTORY -> tabState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
                     tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
                         model.dismissInitialOwnerEmailOffer()
                         model.clearError()

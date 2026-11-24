@@ -71,37 +71,43 @@ internal fun MetricRow(label: String, value: String, strong: Boolean = false) {
 }
 
 @Composable
-internal fun ProductsScreen(products: List<Product>, onEdit: (Long) -> Unit) {
+internal fun ProductsScreen(menu: List<MenuItem>, onEdit: (Long) -> Unit, onIngredients: () -> Unit) {
     var filter by rememberSaveable { mutableStateOf("") }
-    val shown = products.filter { it.name.contains(filter.trim(), true) || it.category.contains(filter.trim(), true) }
+    val shown = menu.filter { it.product.name.contains(filter.trim(), true) || it.product.category.contains(filter.trim(), true) }
+    val counts = menu.map { it.availableStock() }
     LazyColumn(
         Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Header("02  /  INVENTARIS", "Produk", "Atur harga, kategori, dan stok barang.")
+            Header("02  /  INVENTARIS", "Produk", "Isi stok bahan, lalu atur resep, kategori, dan harga menu.")
         }
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("${products.size} produk", color = Pine, fontWeight = FontWeight.Bold)
-                    Text("${products.count { it.stock in 0..5 }} stok menipis", color = Muted, style = MaterialTheme.typography.labelMedium)
-                }
-                Button(onClick = { onEdit(0L) }) {
-                    Icon(Icons.Default.Add, null, Modifier.size(19.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("Tambah produk")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("${menu.size} produk • ${counts.count { it == 0 }} habis • ${counts.count { it in 1..5 }} menipis",
+                    color = Muted, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onIngredients, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) { Text("Stok bahan") }
+                    Button(onClick = { onEdit(0L) }, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
+                        Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Tambah produk")
+                    }
                 }
             }
         }
         item {
             OutlinedTextField(filter, { filter = it }, Modifier.fillMaxWidth(), singleLine = true,
-                placeholder = { Text("Cari produk") }, leadingIcon = { Icon(Icons.Default.Search, null) },
+                placeholder = { Text("Cari nama atau kategori") }, leadingIcon = { Icon(Icons.Default.Search, null) },
                 shape = Shape, colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line,
                     unfocusedContainerColor = Color.White, focusedContainerColor = Color.White))
         }
         if (shown.isEmpty()) item { EmptyPanel("Belum ada hasil", "Tambahkan produk atau ubah pencarian.") }
-        items(shown, key = { it.id }) { product ->
+        items(shown, key = { it.product.id }) { item ->
+            val product = item.product
+            val available = item.availableStock()
             Surface(onClick = { onEdit(product.id) }, shape = Shape, border = BorderStroke(1.dp, Line), color = Color.White) {
                 Row(Modifier.fillMaxWidth().padding(13.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically) {
@@ -112,7 +118,11 @@ internal fun ProductsScreen(products: List<Product>, onEdit: (Long) -> Unit) {
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text(rupiah(product.price), color = Pine, fontWeight = FontWeight.Bold)
-                        Text("Stok ${product.stock}", color = if (product.stock <= 5) Color(0xFF9C5007) else Muted,
+                        Text(when {
+                            available == 0 -> "Stok habis"
+                            item.recipe.isNotEmpty() -> "$available porsi"
+                            else -> "Stok $available"
+                        }, color = if (available <= 5) Color(0xFF9C5007) else Muted,
                             style = MaterialTheme.typography.labelSmall)
                     }
                 }
@@ -122,37 +132,54 @@ internal fun ProductsScreen(products: List<Product>, onEdit: (Long) -> Unit) {
 }
 
 @Composable
-internal fun ProductForm(product: Product, model: RegisterModel, onClose: () -> Unit) {
+internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: RegisterModel, onClose: () -> Unit) {
+    val product = item.product
+    val isNew = product.id == 0L
     var name by rememberSaveable { mutableStateOf(product.name) }
     var category by rememberSaveable { mutableStateOf(product.category) }
-    var price by rememberSaveable { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
-    var stock by rememberSaveable { mutableStateOf(if (product.id == 0L) "" else product.stock.toString()) }
+    var price by rememberSaveable { mutableStateOf(if (isNew) "" else product.price.toString()) }
+    var stock by rememberSaveable { mutableStateOf(product.stock.toString()) }
+    var draft by rememberSaveable(stateSaver = recipeSaver) {
+        mutableStateOf(item.recipe.associate { it.ingredient.id to it.line.quantity.toString() })
+    }
     var confirming by rememberSaveable { mutableStateOf(false) }
     val numericPrice = parseRupiah(price, maxDigits = 9)
     val numericStock = stock.toIntOrNull()
+    val useDirectStock = !isNew && item.recipe.isEmpty() && draft.isEmpty()
+    val recipe = draft.mapNotNull { (id, amount) ->
+        amount.toIntOrNull()?.takeIf { it in 1..MAX_INGREDIENT_STOCK }?.let { id to it }
+    }.toMap()
+    val validRecipe = recipe.isNotEmpty() && recipe.size == draft.size && recipe.keys.all { id -> ingredients.any { it.id == id } }
     Column(Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Header("INVENTARIS", if (product.id == 0L) "Produk baru" else "Edit produk", "Lengkapi informasi yang digunakan di kasir.")
+        Header("INVENTARIS", if (isNew) "Produk baru" else "Edit produk", "Lengkapi informasi yang digunakan di kasir.")
         OutlinedTextField(name, { name = it.take(70) }, Modifier.fillMaxWidth(), label = { Text("Nama produk") }, singleLine = true)
         OutlinedTextField(category, { category = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("Kategori") }, singleLine = true)
-        OutlinedTextField(price, { price = it }, Modifier.fillMaxWidth(),
-            label = { Text("Harga jual") },
+        OutlinedTextField(price, { price = it }, Modifier.fillMaxWidth(), label = { Text("Harga jual") },
             prefix = { if (!price.trimStart().startsWith("Rp", ignoreCase = true)) Text("Rp ") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         if (price.isNotBlank() && numericPrice == null) ErrorText("Gunakan format Rupiah hingga 9 digit, misalnya Rp19.000,00.")
-        OutlinedTextField(stock, { stock = it.filter { c -> c in '0'..'9' }.take(5) }, Modifier.fillMaxWidth(),
-            label = { Text("Stok tersedia") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        if (useDirectStock) {
+            OutlinedTextField(stock, { if (it.length <= 5 && it.all { c -> c in '0'..'9' }) stock = it }, Modifier.fillMaxWidth(),
+                label = { Text("Stok produk") }, supportingText = { Text("Stok langsung dipakai sampai resep ditambahkan.") },
+                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        }
+        RecipeEditor(ingredients, draft, { draft = it }, enabled = !model.busy)
         ErrorText(model.error)
         Button(
             onClick = {
-                if (numericPrice != null && numericStock != null) {
-                    model.saveProduct(product.copy(name = name.trim(), category = category.trim(), price = numericPrice, stock = numericStock), onClose)
+                if (numericPrice != null && (validRecipe || (useDirectStock && numericStock != null))) {
+                    model.saveProduct(
+                        product.copy(name = name.trim(), category = category.trim(), price = numericPrice, stock = numericStock ?: 0),
+                        recipe, onClose
+                    )
                 }
             },
-            enabled = !model.busy && name.isNotBlank() && category.isNotBlank() && numericPrice != null && numericStock != null,
+            enabled = !model.busy && name.isNotBlank() && category.isNotBlank() && numericPrice != null &&
+                (validRecipe || (useDirectStock && numericStock != null)),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text("Simpan produk") }
-        if (product.id != 0L) TextButton(onClick = { confirming = true }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
+        if (!isNew) TextButton(onClick = { confirming = true }, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) {
             Text("Hapus produk", color = MaterialTheme.colorScheme.error)
         }
     }
