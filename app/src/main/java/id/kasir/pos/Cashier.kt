@@ -206,7 +206,7 @@ private fun QuantityDialog(product: Product, quantity: Int, onDismiss: () -> Uni
         mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
     }
     val entered = input.text.toIntOrNull()
-    val valid = entered != null && entered in 1..product.stock
+    val valid = entered != null && canSetCartQuantity(quantity, entered, product.stock)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ubah jumlah") },

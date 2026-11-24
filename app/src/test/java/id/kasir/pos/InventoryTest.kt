@@ -1,8 +1,10 @@
 package id.kasir.pos
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class InventoryTest {
@@ -44,6 +46,8 @@ class InventoryTest {
         var cart = mapOf(1L to 3)
         val product = availableCatalog(menu, cart).single()
         assertEquals("Stok Berry Go tidak cukup. Kurangi jumlah atau tambah stok.", cartStockIssue(listOf(product), cart))
+        assertTrue(canSetCartQuantity(current = 3, quantity = 2, stock = product.stock))
+        assertFalse(canSetCartQuantity(current = 3, quantity = 4, stock = product.stock))
         cart = updateCartQuantity(cart, product, 2)
         assertEquals(mapOf(1L to 2), cart)
         assertEquals("Stok Berry Go tidak cukup. Kurangi jumlah atau tambah stok.", cartStockIssue(listOf(product), cart))
