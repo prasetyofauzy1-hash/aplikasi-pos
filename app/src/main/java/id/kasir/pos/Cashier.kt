@@ -107,10 +107,11 @@ internal fun CashierScreen(
                     Row(Modifier.align(Alignment.CenterVertically), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.ShoppingCart, null, Modifier.size(21.dp))
                         Column(Modifier.padding(start = 9.dp, end = 8.dp)) {
-                            Text(
-                                if (compact || count == 0L) "Keranjang" else "Lihat keranjang",
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text(when {
+                                count == 0L -> "Keranjang kosong"
+                                compact -> "Keranjang"
+                                else -> "Lihat keranjang"
+                            }, fontWeight = FontWeight.Bold)
                             if (!compact && count > 0) Text("$count barang", style = MaterialTheme.typography.labelSmall)
                         }
                     }
@@ -126,6 +127,7 @@ internal fun CashierScreen(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 private fun CatalogCard(product: Product, quantity: Int, onAdd: () -> Unit) {
     Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
         Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -139,11 +141,12 @@ private fun CatalogCard(product: Product, quantity: Int, onAdd: () -> Unit) {
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(product.category, color = Muted, style = MaterialTheme.typography.labelSmall,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(rupiah(product.price), modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold,
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(rupiah(product.price), modifier = Modifier.align(Alignment.CenterVertically), fontWeight = FontWeight.Bold,
                     color = Pine, style = MaterialTheme.typography.bodySmall)
                 FilledTonalIconButton(
                     onClick = onAdd, enabled = quantity < product.stock,
+                    modifier = Modifier.align(Alignment.CenterVertically),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(containerColor = Lime, contentColor = Pine)
                 ) { Icon(Icons.Default.Add, "Tambah ${product.name}") }
             }
