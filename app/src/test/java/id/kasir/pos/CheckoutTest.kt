@@ -40,6 +40,21 @@ class CheckoutTest {
         assertThrows(SaleInputException::class.java) { calculateCheckout(listOf(coffee), mapOf(1L to 1), Payment.CASH, 14_000) }
     }
 
+    @Test fun largePriceAndQuantityKeepExactRupiahTotals() {
+        val premium = Product(3, "Jus Berry Go Premium", "Jus", 999_999_999, 99_999)
+        val cart = mapOf(3L to 9_999)
+        val order = calculateCheckout(listOf(premium), cart, Payment.CASH, 10_000_000_000_000)
+
+        assertEquals(9_998_999_990_001L, order.total)
+        assertEquals(order.total, cartTotal(listOf(premium), cart))
+        assertEquals(1_000_009_999L, order.paid - order.total)
+        assertEquals("Rp9.998.999.990.001", rupiah(order.total))
+    }
+
+    @Test fun itemCountDoesNotWrapAtIntLimit() {
+        assertEquals(2_147_483_648L, cartItemCount(mapOf(1L to Int.MAX_VALUE, 2L to 1)))
+    }
+
     @Test fun qrisRecordsExactTotalAndReceiptOmitsChange() {
         val order = calculateCheckout(listOf(coffee), mapOf(1L to 1), Payment.QRIS, null)
         assertEquals(15_000L, order.total)

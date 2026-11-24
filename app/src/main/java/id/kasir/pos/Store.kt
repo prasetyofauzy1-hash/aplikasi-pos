@@ -15,6 +15,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
+import androidx.room.migration.Migration
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
@@ -30,6 +32,11 @@ data class Product(
     val price: Long,
     val stock: Int
 )
+
+@Entity(foreignKeys = [ForeignKey(
+    entity = Product::class, parentColumns = ["id"], childColumns = ["productId"], onDelete = ForeignKey.CASCADE
+)])
+data class CartItem(@PrimaryKey val productId: Long, val quantity: Int)
 
 @Entity
 data class Sale(
@@ -64,6 +71,14 @@ interface PosDao {
     @Insert suspend fun add(product: Product)
     @Update suspend fun update(product: Product)
     @Query("DELETE FROM Product WHERE id = :id") suspend fun delete(id: Long)
+    @Query("SELECT * FROM CartItem") fun cart(): Flow<List<CartItem>>
+    @Query("SELECT * FROM CartItem") suspend fun cartSnapshot(): List<CartItem>
+    @Query("SELECT quantity FROM CartItem WHERE productId = :id") suspend fun cartQuantity(id: Long): Int?
+    @Upsert suspend fun putCartItem(item: CartItem)
+    @Query("DELETE FROM CartItem WHERE productId = :id") suspend fun removeCartItem(id: Long)
+    @Query("UPDATE CartItem SET quantity = MIN(quantity, :stock) WHERE productId = :id")
+    suspend fun capCartQuantity(id: Long, stock: Int)
+    @Query("DELETE FROM CartItem") suspend fun clearCart()
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
     @Transaction
@@ -74,12 +89,22 @@ interface PosDao {
     @Insert suspend fun addLines(lines: List<SaleLine>)
 }
 
-@Database(entities = [Product::class, Sale::class, SaleLine::class], version = 1)
+@Database(entities = [Product::class, Sale::class, SaleLine::class, CartItem::class], version = 2)
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addCart = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `CartItem` (`productId` INTEGER NOT NULL, `quantity` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`productId`), FOREIGN KEY(`productId`) REFERENCES `Product`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+            }
+        }
+
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
+            .addMigrations(addCart)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     listOf(
@@ -106,6 +131,8 @@ class SaleInputException(message: String) : IllegalArgumentException(message)
 
 data class Checkout(val lines: List<SaleLine>, val total: Long, val paid: Long)
 
+internal fun cartItemCount(cart: Map<Long, Int>): Long = cart.values.sumOf { it.toLong() }
+
 fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Payment, cash: Long?): Checkout {
     if (cart.isEmpty()) throw SaleInputException("Keranjang masih kosong.")
     val byId = products.associateBy { it.id }
@@ -125,6 +152,9 @@ class Register(private val db: PosDatabase) {
 
     suspend fun sell(cart: Map<Long, Int>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile): Receipt =
         db.withTransaction {
+            if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
+                throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
+            }
             val order = calculateCheckout(dao.byId(cart.keys), cart, payment, cash)
             if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
             val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
@@ -135,6 +165,7 @@ class Register(private val db: PosDatabase) {
             }
             val lines = order.lines.map { it.copy(saleId = id) }
             dao.addLines(lines)
+            dao.clearCart()
             Receipt(sale.copy(id = id), lines)
         }
 }
