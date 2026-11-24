@@ -152,6 +152,7 @@ internal fun CartScreen(products: List<Product>, model: RegisterModel, onPay: ()
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val listed = products.filter { it.id in model.cart }
     val count = model.cart.values.sum()
+    val stockIssue = cartStockIssue(products, model.cart)
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { Header("02  /  PERIKSA PESANAN", "Keranjang", "$count barang untuk transaksi ini.") }
@@ -183,7 +184,8 @@ internal fun CartScreen(products: List<Product>, model: RegisterModel, onPay: ()
         }
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             TotalBanner("Total pesanan", cartTotal(products, model.cart))
-            Button(onClick = onPay, enabled = listed.isNotEmpty(), modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+            ErrorText(stockIssue)
+            Button(onClick = onPay, enabled = listed.isNotEmpty() && stockIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
                 Text("Lanjut ke pembayaran")
             }
         }
@@ -239,6 +241,7 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
     val total = cartTotal(products, model.cart)
+    val stockIssue = cartStockIssue(products, model.cart)
     val cash = parseRupiah(amount, maxDigits = 18)
     val focusManager = LocalFocusManager.current
     val setCash: (Long) -> Unit = {
@@ -251,6 +254,10 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("03  /  SELESAIKAN TRANSAKSI", "Pembayaran", "Catat pembayaran yang diterima dari pelanggan.")
+        if (stockIssue != null || model.cart.isEmpty()) {
+            EmptyPanel("Pembayaran belum tersedia", stockIssue ?: "Keranjang masih kosong.")
+            return@Column
+        }
         TotalBanner("Total yang harus dibayar", total)
         Text("Metode pembayaran", fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

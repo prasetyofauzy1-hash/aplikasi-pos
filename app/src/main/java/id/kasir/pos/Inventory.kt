@@ -74,6 +74,18 @@ internal fun availableCatalog(menu: List<MenuItem>, cart: Map<Long, Int>): List<
     }
 }
 
+internal fun cartStockIssue(available: List<Product>, cart: Map<Long, Int>): String? {
+    val byId = available.associateBy { it.id }
+    return cart.entries.firstNotNullOfOrNull { (id, quantity) ->
+        val product = byId[id]
+        when {
+            product == null -> "Ada produk yang tidak tersedia. Perbarui keranjang."
+            quantity !in 1..product.stock -> "Stok ${product.name} tidak cukup. Kurangi jumlah atau tambah stok."
+            else -> null
+        }
+    }
+}
+
 internal fun checkedIngredientDemand(menu: List<MenuItem>, cart: Map<Long, Int>): Map<Long, Int> {
     val ingredients = menu.flatMap { it.recipe }.associate { it.ingredient.id to it.ingredient }
     return ingredientDemand(menu, cart).mapValues { (id, required) ->

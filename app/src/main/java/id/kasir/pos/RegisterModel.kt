@@ -140,7 +140,13 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setQuantity(product: Product, quantity: Int) {
-        if (!busy) cart = updateCartQuantity(cart, product, quantity)
+        if (busy) return
+        val current = cart[product.id] ?: 0
+        val available = if (quantity > current) {
+            val items = menu.value
+            items.firstOrNull { it.product.id == product.id }?.availableStock(ingredientDemand(items, cart), current) ?: 0
+        } else product.stock
+        cart = updateCartQuantity(cart, product.copy(stock = available), quantity)
     }
 
     fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {

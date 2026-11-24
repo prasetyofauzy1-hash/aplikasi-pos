@@ -1,6 +1,7 @@
 package id.kasir.pos
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
@@ -36,6 +37,17 @@ class InventoryTest {
             checkedIngredientDemand(listOf(berryGo, smoothie), mapOf(1L to 2, 2L to 1))
         }
         assertEquals("Stok bahan Pisang tidak mencukupi.", failure.message)
+    }
+
+    @Test fun cartBlocksPaymentAfterStockCorrectionUntilQuantityIsReduced() {
+        val menu = listOf(menuItem(1, "Berry Go", berries to 200, banana.copy(stock = 200) to 200))
+        var cart = mapOf(1L to 3)
+        val product = availableCatalog(menu, cart).single()
+        assertEquals("Stok Berry Go tidak cukup. Kurangi jumlah atau tambah stok.", cartStockIssue(listOf(product), cart))
+        cart = updateCartQuantity(cart, product, 2)
+        assertEquals(mapOf(1L to 2), cart)
+        assertEquals("Stok Berry Go tidak cukup. Kurangi jumlah atau tambah stok.", cartStockIssue(listOf(product), cart))
+        assertNull(cartStockIssue(listOf(product), updateCartQuantity(cart, product, 1)))
     }
 
     @Test fun largeDemandCannotWrapToAValidStockAmount() {

@@ -2,7 +2,7 @@ package id.kasir.pos
 
 internal fun updateCartQuantity(cart: Map<Long, Int>, product: Product, quantity: Int): Map<Long, Int> = when {
     quantity == 0 -> cart - product.id
-    quantity in 1..product.stock -> cart + (product.id to quantity)
+    quantity in 1..product.stock || quantity in 1 until (cart[product.id] ?: 0) -> cart + (product.id to quantity)
     else -> cart
 }
 
