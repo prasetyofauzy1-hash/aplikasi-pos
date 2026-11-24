@@ -68,6 +68,12 @@ class ThermalReceiptTest {
         assertTrue(lines.contains("Rp9.998.999.990.001".padStart(32)))
     }
 
+    @Test fun separatesTheWholeNumberFromAnAdjacentVulgarFraction() {
+        val flour = receipt.copy(lines = listOf(receipt.lines[0].copy(productName = "Tepung 1½ kg, gula 12¾ kg")))
+        val lines = printedLines(flour, ThermalPaper.MM58)
+        assertTrue(lines.contains("Tepung 1 1/2 kg, gula 12 3/4 kg"))
+    }
+
     private fun printedLines(receipt: Receipt, paper: ThermalPaper) = thermalReceipt(receipt, paper)
         .toString(Charsets.US_ASCII)
         .replace("\u001B@", "").replace("\u001Ba\u0001", "").replace("\u001Ba\u0000", "")

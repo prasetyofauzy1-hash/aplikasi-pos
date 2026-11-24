@@ -8,12 +8,15 @@ internal enum class ThermalPaper(val label: String, val columns: Int) {
 }
 
 private val combiningMarks = Regex("\\p{M}+")
-private val printerSymbols = Regex("[¼½¾⅐-⅞⁄‘’‚‛“”„‟‐‑‒–—―−…]")
+private const val vulgarFractions = "¼½¾⅐-⅞"
+private val mixedNumberBoundary = Regex("(?<=\\p{Nd})(?=[$vulgarFractions])")
+private val printerSymbols = Regex("[$vulgarFractions⁄‘’‚‛“”„‟‐‑‒–—―−…]")
 private val whitespace = Regex("[\\s\\p{Z}]+")
 private val nonPrintable = Regex("[^ -~]")
 
 private fun String.printerText() = Normalizer.normalize(this, Normalizer.Form.NFD)
     .replace(combiningMarks, "")
+    .replace(mixedNumberBoundary, " ")
     .replace(printerSymbols) { match ->
         when (match.value[0]) {
             '‘', '’', '‚', '‛' -> "'"
