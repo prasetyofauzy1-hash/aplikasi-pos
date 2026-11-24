@@ -94,3 +94,38 @@ internal fun checkedIngredientDemand(menu: List<MenuItem>, cart: Map<Long, Int>)
         required.toInt()
     }
 }
+
+@Entity
+data class StockCount(@PrimaryKey(autoGenerate = true) val id: Long = 0, val time: Long)
+
+@Entity(
+    foreignKeys = [ForeignKey(entity = StockCount::class, parentColumns = ["id"], childColumns = ["countId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("countId")]
+)
+data class StockCountLine(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val countId: Long,
+    val ingredientId: Long?,
+    val ingredientName: String,
+    val unit: String,
+    val systemStock: Int,
+    val countedStock: Int
+) {
+    val difference: Long get() = countedStock.toLong() - systemStock
+}
+
+data class StockCountReport(
+    @Embedded val count: StockCount,
+    @Relation(parentColumn = "id", entityColumn = "countId") val lines: List<StockCountLine>
+)
+
+internal fun stockCountLines(ingredients: List<Ingredient>, counted: Map<Long, Int>): List<StockCountLine> {
+    if (counted.isEmpty()) throw SaleInputException("Isi hasil hitungan fisik setidaknya satu bahan.")
+    val byId = ingredients.associateBy { it.id }
+    return counted.map { (id, quantity) ->
+        val ingredient = byId[id] ?: throw SaleInputException("Ada bahan yang sudah dihapus. Buka stok opname lagi.")
+        if (quantity !in 0..MAX_INGREDIENT_STOCK) throw SaleInputException("Jumlah ${ingredient.name} tidak valid.")
+        StockCountLine(countId = 0, ingredientId = id, ingredientName = ingredient.name, unit = ingredient.unit,
+            systemStock = ingredient.stock, countedStock = quantity)
+    }.sortedBy { it.ingredientName.lowercase() }
+}

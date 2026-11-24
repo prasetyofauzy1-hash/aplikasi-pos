@@ -102,6 +102,7 @@ private fun RegisterApp(model: RegisterModel) {
     val selectedId = editingId
     var showIngredients by rememberSaveable { mutableStateOf(false) }
     var editingIngredient by rememberSaveable { mutableStateOf<Long?>(null) }
+    var stockOpnameScreen by rememberSaveable { mutableStateOf("") }
     val tabState = rememberSaveableStateHolder()
     val receipt = model.receipt
     val closeSubScreen: () -> Unit = {
@@ -110,6 +111,7 @@ private fun RegisterApp(model: RegisterModel) {
                 receipt != null -> model.closeReceipt()
                 selectedId != null -> editingId = null
                 editingIngredient != null -> editingIngredient = null
+                stockOpnameScreen.isNotEmpty() -> stockOpnameScreen = ""
                 showIngredients -> showIngredients = false
                 orderScreen == "payment" -> orderScreen = "cart"
                 else -> orderScreen = ""
@@ -144,6 +146,8 @@ private fun RegisterApp(model: RegisterModel) {
                     receipt != null -> "Struk transaksi"
                     selectedId != null -> if (selectedId == 0L) "Tambah produk" else "Edit produk"
                     editingIngredient != null -> if (editingIngredient == 0L) "Tambah bahan" else "Edit bahan"
+                    stockOpnameScreen == "count" -> "Stok opname"
+                    stockOpnameScreen == "history" -> "Riwayat opname"
                     showIngredients -> "Stok bahan"
                     orderScreen == "payment" -> "Pembayaran"
                     else -> "Keranjang"
@@ -174,7 +178,14 @@ private fun RegisterApp(model: RegisterModel) {
                             }
                         }
                     }
-                    showIngredients -> IngredientStockScreen(ingredients, model, onEdit = { editingIngredient = it })
+                    stockOpnameScreen == "count" -> StockOpnameScreen(ingredients, model, onSaved = { stockOpnameScreen = "history" })
+                    stockOpnameScreen == "history" -> {
+                        val stockCounts by model.stockCounts.collectAsStateWithLifecycle()
+                        StockOpnameHistoryScreen(stockCounts)
+                    }
+                    showIngredients -> IngredientStockScreen(ingredients, model, onEdit = { editingIngredient = it },
+                        onStockOpname = { model.clearError(); stockOpnameScreen = "count" },
+                        onStockOpnameHistory = { stockOpnameScreen = "history" })
                     orderScreen == "cart" -> CartScreen(products, cart, model, short, onPay = { orderScreen = "payment" })
                     orderScreen == "payment" -> PaymentScreen(products, cart, model, onPaid = {
                         cashierQuery = ""

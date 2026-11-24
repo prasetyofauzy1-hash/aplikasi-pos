@@ -39,6 +39,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     internal val cashiers = dao.cashiers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val stockCounts = dao.stockCounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -373,6 +374,16 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     fun restockIngredient(id: Long, quantity: Int, onDone: () -> Unit) = runAction("Stok tidak dapat ditambah.") {
         if (quantity !in 1..MAX_INGREDIENT_STOCK || dao.restockIngredient(id, quantity, MAX_INGREDIENT_STOCK) != 1) {
             throw SaleInputException("Periksa jumlah tambahan dan stok saat ini.")
+        }
+        onDone()
+    }
+
+    fun saveStockCount(counted: Map<Long, Int>, onDone: () -> Unit) = runAction("Stok opname tidak dapat disimpan.") {
+        database.withTransaction {
+            val lines = stockCountLines(dao.ingredientsById(counted.keys), counted)
+            val id = dao.addStockCount(StockCount(time = System.currentTimeMillis()))
+            dao.addStockCountLines(lines.map { it.copy(countId = id) })
+            lines.forEach { dao.setIngredientStock(requireNotNull(it.ingredientId), it.countedStock) }
         }
         onDone()
     }
