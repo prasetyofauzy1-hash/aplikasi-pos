@@ -70,7 +70,10 @@ data class StoreSettings(
     val extraCharges: String
 )
 
-@Entity
+@Entity(
+    foreignKeys = [ForeignKey(entity = CashierShift::class, parentColumns = ["id"], childColumns = ["shiftId"], onDelete = ForeignKey.RESTRICT)],
+    indices = [Index(value = ["shiftId", "method"])]
+)
 data class Sale(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val time: Long,
@@ -83,7 +86,8 @@ data class Sale(
     val cashierName: String? = null,
     @ColumnInfo(defaultValue = "0") val subtotal: Long = total,
     val ingredientDeductions: String? = null,
-    val productDeductions: String? = null
+    val productDeductions: String? = null,
+    val shiftId: Long? = null
 ) {
     val cashierLabel: String? get() = cashierName?.let { "Kasir: $it" }
 }
@@ -125,6 +129,13 @@ data class Receipt(
 internal data class SaleDeletion(val sale: Sale, val countedIngredients: List<Ingredient>) {
     val countedIds get() = countedIngredients.mapTo(mutableSetOf()) { it.id }
 }
+
+private const val LATEST_SHIFT = """
+    SELECT CashierShift.*, COALESCE(closingCashSales, (
+        SELECT SUM(total) FROM Sale WHERE shiftId = CashierShift.id AND method = :cashMethod
+    ), 0) AS cashSales
+    FROM CashierShift ORDER BY id DESC LIMIT 1
+"""
 
 @Dao
 interface PosDao {
@@ -201,15 +212,34 @@ interface PosDao {
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
+@Dao
+internal interface ShiftDao {
+    @Query(LATEST_SHIFT) fun observeLatest(cashMethod: String): Flow<List<ShiftSummary>>
+    @Query(LATEST_SHIFT) suspend fun latest(cashMethod: String): ShiftSummary?
+    @Query("SELECT EXISTS(SELECT 1 FROM CashierShift WHERE closedAt IS NULL)") suspend fun hasActiveShift(): Boolean
+    @Insert suspend fun add(shift: CashierShift)
+    @Update suspend fun update(shift: CashierShift)
+}
+
 @Database(
     entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class,
-        CartItem::class, CashierProfile::class, StockCount::class, StockCountLine::class, SaleCharge::class, StoreSettings::class],
-    version = 10
+        CartItem::class, CashierProfile::class, StockCount::class, StockCountLine::class, SaleCharge::class,
+        StoreSettings::class, CashierShift::class],
+    version = 11
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
+    internal abstract fun shiftDao(): ShiftDao
 
     companion object {
+        private val addCashierShifts = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS CashierShift (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, openedAt INTEGER NOT NULL, openingCash INTEGER NOT NULL, closedAt INTEGER, closingCash INTEGER, closingCashSales INTEGER)")
+                db.execSQL("ALTER TABLE Sale ADD COLUMN shiftId INTEGER REFERENCES CashierShift(id) ON UPDATE NO ACTION ON DELETE RESTRICT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_Sale_shiftId_method ON Sale (shiftId, method)")
+            }
+        }
+
         private val addProfitCosts = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE Ingredient ADD COLUMN purchaseCost INTEGER")
@@ -314,7 +344,8 @@ abstract class PosDatabase : RoomDatabase() {
         private fun builder(context: Context, name: String) = Room.databaseBuilder(context, PosDatabase::class.java, name)
             .addMigrations(
                 addCart, addIngredients, addSaleLineProductId, addCashierProfiles,
-                addStockCounts, addVariantsDiscountsCharges, addStoreSettings, addSaleStockDeductions, addProfitCosts
+                addStockCounts, addVariantsDiscountsCharges, addStoreSettings,
+                addSaleStockDeductions, addProfitCosts, addCashierShifts
             )
 
         fun open(context: Context): PosDatabase = builder(context, "kasir-rapi.db")
@@ -398,11 +429,36 @@ fun calculateCheckout(
 
 class Register(private val db: PosDatabase) {
     private val dao = db.dao()
+    private val shifts = db.shiftDao()
+
+    internal suspend fun openShift(openingCash: Long) = db.withTransaction {
+        requireShiftCash(openingCash)
+        if (shifts.hasActiveShift()) throw SaleInputException("Shift kasir sudah terbuka.")
+        shifts.add(CashierShift(openedAt = System.currentTimeMillis(), openingCash = openingCash))
+    }
+
+    internal suspend fun closeShift(preview: ShiftSummary, closingCash: Long) = db.withTransaction {
+        requireShiftCash(closingCash)
+        val current = shifts.latest(Payment.CASH.label)
+        if (current == null || !current.isOpen || current.shift.id != preview.shift.id) {
+            throw SaleInputException("Shift ini sudah tidak aktif.")
+        }
+        if (current.cashSales != preview.cashSales) {
+            throw SaleInputException("Total tunai berubah. Periksa kembali sebelum menutup shift.")
+        }
+        shifts.update(current.shift.copy(
+            closedAt = System.currentTimeMillis(),
+            closingCash = closingCash,
+            closingCashSales = current.cashSales
+        ))
+    }
 
     suspend fun sell(
         cart: List<CartItem>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile, cashierId: Long,
         charges: List<ExtraCharge> = emptyList()
     ): Receipt = db.withTransaction {
+        val shift = shifts.latest(Payment.CASH.label)?.takeIf { it.isOpen }
+            ?: throw SaleInputException("Buka shift kasir sebelum menyimpan transaksi.")
         if (dao.cartSnapshot().sortedBy { it.id } != cart.sortedBy { it.id }) {
             throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
         }
@@ -410,6 +466,9 @@ class Register(private val db: PosDatabase) {
         val menu = dao.menuById(quantities.keys)
         val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash, charges)
         if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
+        if (order.total < 0 || (payment == Payment.CASH && order.total > Long.MAX_VALUE - shift.expectedCash)) {
+            throw SaleInputException("Nominal transaksi melebihi batas.")
+        }
         val ingredients = checkedIngredientDemand(menu, quantities)
         val products = productStockDeductions(menu, quantities)
         val cashier = dao.cashier(cashierId) ?: dao.cashier(OWNER_CASHIER_ID)
@@ -417,7 +476,7 @@ class Register(private val db: PosDatabase) {
         val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
             method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName,
             cashierName = cashier.name, subtotal = order.subtotal, ingredientDeductions = encodeStockDeductions(ingredients),
-            productDeductions = encodeStockDeductions(products))
+            productDeductions = encodeStockDeductions(products), shiftId = shift.shift.id)
         val id = dao.addSale(sale)
         for ((productId, quantity) in products) {
             if (dao.decrement(productId, quantity) != 1) {

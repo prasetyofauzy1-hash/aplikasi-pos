@@ -109,6 +109,8 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
     val menu by model.menu.collectAsStateWithLifecycle()
     val ingredients by model.ingredients.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
+    val latestShift by model.latestShift.collectAsStateWithLifecycle()
+    val shift = latestShift?.firstOrNull()
     val products = remember(menu, cart) { availableCatalog(menu, cartQuantities(cart)) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     DisposableEffect(tab, window) {
@@ -211,14 +213,18 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
                     showIngredients -> IngredientStockScreen(ingredients, model, onEdit = { editingIngredient = it },
                         onStockOpname = { model.clearError(); stockOpnameScreen = "count" },
                         onStockOpnameHistory = { stockOpnameScreen = "history" })
-                    orderScreen == "cart" -> CartScreen(products, cart, model, short, onPay = { orderScreen = "payment" })
+                    orderScreen == "cart" -> CartScreen(
+                        products, cart, model, short, shiftOpen = shift?.isOpen == true,
+                        onPay = { orderScreen = "payment" }
+                    )
                     orderScreen == "payment" -> PaymentScreen(products, cart, model, onPaid = {
                         cashierQuery = ""
                         orderScreen = ""
                     })
                     tab == Tab.REGISTER -> CashierScreen(
                         products, cart, model, cashierQuery, onQueryChange = { cashierQuery = it },
-                        compact = short || narrow, searching = imeVisible, onCart = { orderScreen = "cart" }
+                        compact = short || narrow, searching = imeVisible, shiftLoaded = latestShift != null,
+                        shift = shift, onCart = { orderScreen = "cart" }
                     )
                     tab == Tab.PRODUCTS -> tabState.SaveableStateProvider(Tab.PRODUCTS.name) {
                         ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
