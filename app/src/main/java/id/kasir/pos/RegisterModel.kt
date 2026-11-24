@@ -191,10 +191,10 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     internal fun saveCashier(id: Long, name: String, pin: String, onDone: () -> Unit) {
         if (!unlocked) return
         runAction("Profil kasir tidak dapat disimpan.") {
-            val trimmed = name.trim()
-            if (trimmed.isEmpty()) throw SaleInputException("Masukkan nama kasir.")
+            val normalized = normalizeCashierName(name)
+            if (normalized.isEmpty()) throw SaleInputException("Masukkan nama kasir.")
             withContext(Dispatchers.IO) { requireOwnerPin(pin) }
-            val cashier = CashierProfile(id, trimmed)
+            val cashier = CashierProfile(id, normalized)
             if (id == 0L) dao.addCashier(cashier) else dao.updateCashier(cashier)
             onDone()
         }

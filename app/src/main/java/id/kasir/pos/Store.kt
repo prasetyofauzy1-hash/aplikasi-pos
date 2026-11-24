@@ -43,6 +43,11 @@ const val OWNER_CASHIER_ID = 1L
 @Entity
 data class CashierProfile(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String)
 
+private val cashierNameWhitespace = Regex("[\\s\\p{Z}\\u0085]+")
+
+internal fun normalizeCashierName(name: String): String =
+    name.replace(cashierNameWhitespace, " ").trim()
+
 @Entity
 data class Sale(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

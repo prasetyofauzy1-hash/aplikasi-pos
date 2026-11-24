@@ -58,6 +58,14 @@ class ThermalReceiptTest {
         assertFalse(printedLines(receipt, ThermalPaper.MM58).any { it.startsWith("Kasir:") })
     }
 
+    @Test fun pastedCashierNameIsNormalizedToOneReceiptLine() {
+        val name = normalizeCashierName(" \tDewi\r\n\u00a0Ananda\u2028Putri ")
+        assertEquals("Dewi Ananda Putri", name)
+        assertEquals("", normalizeCashierName("\r\n\u2028"))
+        val withCashier = receipt.copy(sale = receipt.sale.copy(cashierName = name))
+        assertTrue(withCashier.asText().lines().contains("Kasir: Dewi Ananda Putri"))
+    }
+
     @Test fun transliteratesCommonSymbolsBeforeReplacingUnsupportedCharacters() {
         val styled = receipt.copy(
             sale = receipt.sale.copy(storeName = "Toko ‘Café’"),
