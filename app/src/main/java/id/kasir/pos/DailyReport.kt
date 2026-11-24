@@ -43,7 +43,19 @@ internal fun reportPeriod(date: Long, zone: TimeZone): ReportPeriod {
     return ReportPeriod(midnight(date), midnight(moveReportDate(date, 1)))
 }
 
-internal data class ProductSales(val name: String, val quantity: Long, val revenue: Long)
+internal data class ProductSales(
+    val name: String,
+    val quantity: Long,
+    val revenue: Long,
+    val productId: Long? = null,
+    val latestUnitPrice: Long? = null
+) {
+    val key: Any get() = productId ?: name
+
+    val duplicateNameDetail: String get() =
+        if (productId == null) "Catatan lama (tanpa kode produk)"
+        else "Harga terakhir ${rupiah(checkNotNull(latestUnitPrice))} · #$productId"
+}
 
 internal data class DailyReport(
     val sales: List<Sale>,
@@ -54,14 +66,17 @@ internal data class DailyReport(
 
 internal fun dailyReport(receipts: List<Receipt>): DailyReport {
     val sales = receipts.map { it.sale }
-    val products = mutableMapOf<String, ProductSales>()
-    receipts.forEach { receipt ->
+    val products = mutableMapOf<Any, ProductSales>()
+    receipts.sortedWith(compareByDescending<Receipt> { it.sale.time }.thenByDescending { it.sale.id }).forEach { receipt ->
         receipt.lines.forEach { line ->
-            val previous = products[line.productName]
-            products[line.productName] = ProductSales(
-                line.productName,
-                (previous?.quantity ?: 0L) + line.quantity,
-                (previous?.revenue ?: 0L) + line.unitPrice * line.quantity
+            val key: Any = line.productId ?: line.productName
+            val previous = products[key]
+            products[key] = ProductSales(
+                name = previous?.name ?: line.productName,
+                quantity = (previous?.quantity ?: 0L) + line.quantity,
+                revenue = (previous?.revenue ?: 0L) + line.unitPrice * line.quantity,
+                productId = line.productId,
+                latestUnitPrice = previous?.latestUnitPrice ?: line.unitPrice.takeIf { line.productId != null }
             )
         }
     }

@@ -14,6 +14,7 @@ class CheckoutTest {
         val order = calculateCheckout(listOf(coffee, wafer), mapOf(1L to 2, 2L to 1), Payment.CASH, 40_000)
         assertEquals(36_000L, order.total)
         assertEquals(4_000L, order.paid - order.total)
+        assertEquals(listOf(1L, 2L), order.lines.map { it.productId })
         assertEquals(listOf("Kopi Susu", "Wafer Keju"), order.lines.map { it.productName })
         assertEquals(listOf(15_000L, 6_000L), order.lines.map { it.unitPrice })
     }
