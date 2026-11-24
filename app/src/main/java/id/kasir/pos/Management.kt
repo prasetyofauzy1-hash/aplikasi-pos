@@ -366,7 +366,7 @@ internal fun HistoryScreen(model: RegisterModel) {
 }
 
 @Composable
-internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -> Unit) {
+internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout: Boolean, onDone: () -> Unit) {
     val sale = receipt.sale
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
@@ -396,6 +396,7 @@ internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -
                     color = Muted, style = MaterialTheme.typography.labelMedium)
             }
         }
+        PrinterActionButton(model, "Cetak struk") { onResult -> model.printReceipt(receipt, onResult) }
         ShareReceiptButton(receipt)
         EmailReceiptButton(receipt)
         if (fromCheckout) {
@@ -494,6 +495,8 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
             enabled = name.isNotBlank() && !model.busy && (selection == null || image != null),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text("Simpan profil toko") }
+        HorizontalDivider(color = Line)
+        PrinterSettings(model)
         HorizontalDivider(color = Line)
         EmptyPanel("Akses pemilik", "Satu PIN untuk mengunci akses kasir di perangkat ini.")
         val email = model.linkedOwnerEmail
