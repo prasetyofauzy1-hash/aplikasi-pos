@@ -80,7 +80,9 @@ data class Sale(
     val storeAddress: String,
     val logoName: String,
     val cashierName: String? = null,
-    @ColumnInfo(defaultValue = "0") val subtotal: Long = total
+    @ColumnInfo(defaultValue = "0") val subtotal: Long = total,
+    val ingredientDeductions: String? = null,
+    val productDeductions: String? = null
 ) {
     val cashierLabel: String? get() = cashierName?.let { "Kasir: $it" }
 }
@@ -118,6 +120,10 @@ data class Receipt(
     @Relation(parentColumn = "id", entityColumn = "saleId") val charges: List<SaleCharge> = emptyList()
 )
 
+internal data class SaleDeletion(val sale: Sale, val countedIngredients: List<Ingredient>) {
+    val countedIds get() = countedIngredients.mapTo(mutableSetOf()) { it.id }
+}
+
 @Dao
 interface PosDao {
     @Query("SELECT * FROM CashierProfile ORDER BY id") fun cashiers(): Flow<List<CashierProfile>>
@@ -142,7 +148,13 @@ interface PosDao {
     @Query("DELETE FROM CartItem") suspend fun clearCart()
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
+    @Query("SELECT EXISTS(SELECT 1 FROM Product WHERE id = :id)")
+    suspend fun productExists(id: Long): Boolean
+    @Query("UPDATE Product SET stock = stock + :quantity WHERE id = :id AND stock <= :maxStock - :quantity")
+    suspend fun restockProduct(id: Long, quantity: Int, maxStock: Int): Int
     @Query("SELECT * FROM Ingredient ORDER BY name COLLATE NOCASE") fun ingredients(): Flow<List<Ingredient>>
+    @Query("SELECT EXISTS(SELECT 1 FROM Ingredient WHERE id = :id)")
+    suspend fun ingredientExists(id: Long): Boolean
     @Query("SELECT EXISTS(SELECT 1 FROM Ingredient WHERE name = :name AND id != :id)")
     suspend fun ingredientNameExists(name: String, id: Long): Boolean
     @Query("SELECT EXISTS(SELECT 1 FROM RecipeLine WHERE ingredientId = :ingredientId)")
@@ -160,12 +172,21 @@ interface PosDao {
     @Insert suspend fun addStockCount(count: StockCount): Long
     @Insert suspend fun addStockCountLines(lines: List<StockCountLine>)
     @Transaction @Query("SELECT * FROM StockCount ORDER BY time DESC, id DESC") fun stockCounts(): Flow<List<StockCountReport>>
+    @Query("""
+        SELECT * FROM Ingredient WHERE EXISTS (
+            SELECT 1 FROM StockCountLine JOIN StockCount ON StockCount.id = StockCountLine.countId
+            WHERE StockCountLine.ingredientId = Ingredient.id AND StockCount.time > :time
+        ) ORDER BY name COLLATE NOCASE
+    """)
+    suspend fun ingredientsCountedAfter(time: Long): List<Ingredient>
     @Query("DELETE FROM RecipeLine WHERE productId = :productId") suspend fun deleteRecipe(productId: Long)
     @Insert suspend fun addRecipe(recipe: List<RecipeLine>)
     @Transaction
     @Query("SELECT * FROM Sale WHERE time >= :start AND time < :end ORDER BY time DESC, id DESC")
     fun dailyReceipts(start: Long, end: Long): Flow<List<Receipt>>
     @Transaction @Query("SELECT * FROM Sale WHERE id = :id") suspend fun receipt(id: Long): Receipt?
+    @Query("SELECT * FROM Sale WHERE id = :id") suspend fun sale(id: Long): Sale?
+    @Query("DELETE FROM Sale WHERE id = :id") suspend fun deleteSale(id: Long)
     @Insert suspend fun addSale(sale: Sale): Long
     @Insert suspend fun addLines(lines: List<SaleLine>)
     @Insert suspend fun addCharges(charges: List<SaleCharge>)
@@ -177,12 +198,19 @@ interface PosDao {
 @Database(
     entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class,
         CartItem::class, CashierProfile::class, StockCount::class, StockCountLine::class, SaleCharge::class, StoreSettings::class],
-    version = 8
+    version = 9
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addSaleStockDeductions = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE Sale ADD COLUMN ingredientDeductions TEXT")
+                db.execSQL("ALTER TABLE Sale ADD COLUMN productDeductions TEXT")
+            }
+        }
+
         private fun addOwnerCashier(db: SupportSQLiteDatabase) {
             db.execSQL("INSERT INTO CashierProfile (id, name) VALUES (?, ?)", arrayOf<Any>(OWNER_CASHIER_ID, "Pemilik"))
         }
@@ -271,7 +299,7 @@ abstract class PosDatabase : RoomDatabase() {
         private fun builder(context: Context, name: String) = Room.databaseBuilder(context, PosDatabase::class.java, name)
             .addMigrations(
                 addCart, addIngredients, addSaleLineProductId, addCashierProfiles,
-                addStockCounts, addVariantsDiscountsCharges, addStoreSettings
+                addStockCounts, addVariantsDiscountsCharges, addStoreSettings, addSaleStockDeductions
             )
 
         fun open(context: Context): PosDatabase = builder(context, "kasir-rapi.db")
@@ -368,14 +396,16 @@ class Register(private val db: PosDatabase) {
         val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash, charges)
         if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
         val ingredients = checkedIngredientDemand(menu, quantities)
+        val products = productStockDeductions(menu, quantities)
         val cashier = dao.cashier(cashierId) ?: dao.cashier(OWNER_CASHIER_ID)
             ?: throw SaleInputException("Profil kasir tidak ditemukan.")
         val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
             method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName,
-            cashierName = cashier.name, subtotal = order.subtotal)
+            cashierName = cashier.name, subtotal = order.subtotal, ingredientDeductions = encodeStockDeductions(ingredients),
+            productDeductions = encodeStockDeductions(products))
         val id = dao.addSale(sale)
-        for (item in menu.filter { it.recipe.isEmpty() }) {
-            if (dao.decrement(item.product.id, quantities.getValue(item.product.id)) != 1) {
+        for ((productId, quantity) in products) {
+            if (dao.decrement(productId, quantity) != 1) {
                 throw SaleInputException("Stok berubah. Periksa keranjang.")
             }
         }
@@ -390,6 +420,32 @@ class Register(private val db: PosDatabase) {
         if (charges.isNotEmpty()) dao.addCharges(charges)
         dao.clearCart()
         Receipt(sale.copy(id = id), lines, charges)
+    }
+
+    internal suspend fun previewSaleDeletion(sale: Sale): SaleDeletion {
+        val deductionIds = decodeStockDeductions(sale.ingredientDeductions).keys
+        val counted = if (deductionIds.isEmpty()) emptyList() else {
+            dao.ingredientsCountedAfter(sale.time).filter { it.id in deductionIds }
+        }
+        return SaleDeletion(sale, counted)
+    }
+
+    internal suspend fun deleteSale(deletion: SaleDeletion) {
+        db.withTransaction {
+            val id = deletion.sale.id
+            val sale = dao.sale(id) ?: throw SaleInputException("Transaksi tidak ditemukan.")
+            val countedIds = previewSaleDeletion(sale).countedIds
+            if (countedIds != deletion.countedIds) {
+                throw SaleInputException("Stok opname berubah. Tutup konfirmasi lalu coba lagi.")
+            }
+            restoreStockDeductions(sale.ingredientDeductions, "bahan", dao::ingredientExists, countedIds) { ingredientId, quantity ->
+                dao.restockIngredient(ingredientId, quantity, MAX_INGREDIENT_STOCK)
+            }
+            restoreStockDeductions(sale.productDeductions, "produk", dao::productExists) { productId, quantity ->
+                dao.restockProduct(productId, quantity, Int.MAX_VALUE)
+            }
+            dao.deleteSale(id)
+        }
     }
 }
 

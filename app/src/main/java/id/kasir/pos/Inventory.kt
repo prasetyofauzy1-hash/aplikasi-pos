@@ -7,6 +7,7 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Relation
+import org.json.JSONObject
 
 internal const val MAX_INGREDIENT_STOCK = 999_999_999
 internal val ingredientUnits = listOf("g", "ml", "buah")
@@ -128,4 +129,33 @@ internal fun stockCountLines(ingredients: List<Ingredient>, counted: Map<Long, I
         StockCountLine(countId = 0, ingredientId = id, ingredientName = ingredient.name, unit = ingredient.unit,
             systemStock = ingredient.stock, countedStock = quantity)
     }.sortedBy { it.ingredientName.lowercase() }
+}
+
+internal fun productStockDeductions(menu: List<MenuItem>, cart: Map<Long, Int>): Map<Long, Int> =
+    menu.filter { it.recipe.isEmpty() }.associate { it.product.id to cart.getValue(it.product.id) }
+
+internal fun encodeStockDeductions(deductions: Map<Long, Int>): String =
+    JSONObject().apply {
+        for ((id, quantity) in deductions) put(id.toString(), quantity)
+    }.toString()
+
+internal fun decodeStockDeductions(snapshot: String?): Map<Long, Int> {
+    if (snapshot == null) return emptyMap()
+    val deductions = JSONObject(snapshot)
+    return deductions.keys().asSequence().associate { it.toLong() to deductions.getInt(it) }
+}
+
+internal suspend fun restoreStockDeductions(
+    snapshot: String?,
+    stockName: String,
+    exists: suspend (id: Long) -> Boolean,
+    skipIds: Set<Long> = emptySet(),
+    restock: suspend (id: Long, quantity: Int) -> Int
+) {
+    for ((id, quantity) in decodeStockDeductions(snapshot)) {
+        if (id in skipIds) continue
+        if (quantity <= 0 || (restock(id, quantity) != 1 && exists(id))) {
+            throw SaleInputException("Stok $stockName tidak dapat dikembalikan. Periksa apakah stok melebihi batas.")
+        }
+    }
 }

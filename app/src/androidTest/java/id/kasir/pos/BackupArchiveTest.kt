@@ -90,7 +90,9 @@ class BackupArchiveTest {
                 dao.addRecipe(listOf(RecipeLine(product, ingredient.id, 100)))
                 dao.addCartItem(CartItem(productId = product, quantity = 1))
                 val sale = Sale(41, 1234, 16000, 16000, "Tunai", profile.store.name, profile.store.address,
-                    logo.name, cashier.name, subtotal = 15000)
+                    logo.name, cashier.name, subtotal = 15000,
+                    ingredientDeductions = encodeStockDeductions(mapOf(ingredient.id to 100)),
+                    productDeductions = encodeStockDeductions(emptyMap()))
                 dao.addSale(sale)
                 dao.addLines(listOf(SaleLine(saleId = sale.id, productName = "Jus Berry",
                     unitPrice = 15000, quantity = 1, productId = product, options = "Besar", note = "Less sugar")))

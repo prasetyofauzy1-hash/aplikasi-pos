@@ -490,6 +490,20 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         receipt = dao.receipt(id) ?: throw SaleInputException("Struk tidak ditemukan.")
     }
 
+    internal fun previewSaleDeletion(sale: Sale, onReady: (SaleDeletion) -> Unit) =
+        runAction("Konfirmasi hapus transaksi tidak dapat dibuka.") {
+            onReady(register.previewSaleDeletion(sale))
+        }
+
+    internal fun deleteSale(deletion: SaleDeletion, pin: String, onDone: () -> Unit) {
+        if (!unlocked || !pinConfigured) return
+        runAction("Transaksi tidak dapat dihapus.") {
+            withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            register.deleteSale(deletion)
+            onDone()
+        }
+    }
+
     fun closeReceipt() { receipt = null }
 
     internal fun selectPrinter(device: PairedPrinter) {

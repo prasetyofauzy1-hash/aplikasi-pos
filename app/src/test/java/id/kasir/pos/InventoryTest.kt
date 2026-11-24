@@ -1,5 +1,6 @@
 package id.kasir.pos
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -32,6 +33,68 @@ class InventoryTest {
             checkedIngredientDemand(listOf(berryGo, smoothie), mapOf(1L to 1, 2L to 1)))
         assertEquals(mapOf(1L to 400, 2L to 400),
             checkedIngredientDemand(listOf(berryGo), mapOf(1L to 2)))
+    }
+
+    @Test fun deletionRestoresTheOriginalQuantitiesEvenIfARecipeChanges() = runBlocking {
+        val cart = mapOf(1L to 1, 2L to 1)
+        val snapshot = encodeStockDeductions(checkedIngredientDemand(listOf(berryGo, smoothie), cart))
+        val changedRecipe = menuItem(1, "Berry Go", berries to 100)
+        val restored = mutableMapOf<Long, Int>()
+        restoreStockDeductions(snapshot, "bahan", { true }) { id, quantity ->
+            restored[id] = quantity
+            1
+        }
+        assertEquals(mapOf(1L to 200, 2L to 400, 3L to 150), restored)
+        assertFalse(checkedIngredientDemand(listOf(changedRecipe, smoothie), cart) == restored)
+    }
+
+    @Test fun deletionDoesNotGuessAtStockForOldSalesOrSalesWithoutRecipes() = runBlocking {
+        restoreStockDeductions(null, "bahan", { true }) { _, _ -> error("A legacy sale must not use the current recipe") }
+        restoreStockDeductions(encodeStockDeductions(emptyMap()), "bahan", { true }) { _, _ -> error("No ingredients were deducted") }
+    }
+
+    @Test fun deletionFailsWhenADeductionCannotBeRestored() {
+        assertThrows(SaleInputException::class.java) {
+            runBlocking {
+                restoreStockDeductions(encodeStockDeductions(mapOf(1L to 200)), "bahan", { true }) { _, _ -> 0 }
+            }
+        }
+    }
+
+    @Test fun deletionReturnsStockToRemainingIngredientsWhenOneWasDeleted() = runBlocking {
+        val stock = mutableMapOf(berries.id to 400)
+        val snapshot = encodeStockDeductions(mapOf(banana.id to 200, berries.id to 200))
+        restoreStockDeductions(snapshot, "bahan", stock::containsKey) { id, quantity ->
+            val current = stock[id]
+            if (current == null) 0 else {
+                stock[id] = current + quantity
+                1
+            }
+        }
+        assertEquals(mapOf(berries.id to 600), stock)
+    }
+
+    @Test fun deletionReturnsProductStockOnlyForItemsSoldWithoutRecipes() = runBlocking {
+        val bottledWater = MenuItem(Product(7, "Air Mineral", "Minuman", 4000, 5), emptyList())
+        val menu = listOf(berryGo, bottledWater)
+        val cart = mapOf(berryGo.product.id to 1, bottledWater.product.id to 2)
+        val snapshot = encodeStockDeductions(productStockDeductions(menu, cart))
+        val stock = mutableMapOf(berryGo.product.id to 0, bottledWater.product.id to 3)
+        restoreStockDeductions(snapshot, "produk", stock::containsKey) { id, quantity ->
+            stock[id] = stock.getValue(id) + quantity
+            1
+        }
+        assertEquals(mapOf(berryGo.product.id to 0, bottledWater.product.id to 5), stock)
+    }
+
+    @Test fun deletionLeavesCountedIngredientsUnchangedAndRestoresTheRest() = runBlocking {
+        val stock = mutableMapOf(berries.id to 350, banana.id to 200)
+        val snapshot = encodeStockDeductions(mapOf(berries.id to 200, banana.id to 200))
+        restoreStockDeductions(snapshot, "bahan", stock::containsKey, skipIds = setOf(berries.id)) { id, quantity ->
+            stock[id] = stock.getValue(id) + quantity
+            1
+        }
+        assertEquals(mapOf(berries.id to 350, banana.id to 400), stock)
     }
 
     @Test fun rejectsAnOrderThatIndividuallyFitsButTogetherRunsOut() {

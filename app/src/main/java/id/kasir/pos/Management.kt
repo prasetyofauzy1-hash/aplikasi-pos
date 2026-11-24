@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -38,6 +39,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -317,6 +319,7 @@ internal fun HistoryScreen(model: RegisterModel) {
     val (today, zone) = rememberReportClock().value
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var showProducts by rememberSaveable { mutableStateOf(false) }
+    var saleToDelete by remember { mutableStateOf<SaleDeletion?>(null) }
     val listState = rememberLazyListState()
     val date = selectedDate ?: today
     val period = remember(date, zone) { reportPeriod(date, zone) }
@@ -357,7 +360,7 @@ internal fun HistoryScreen(model: RegisterModel) {
                 FilterChip(!showProducts, onClick = { showProducts = false }, label = { Text("Transaksi") })
                 FilterChip(showProducts, onClick = { showProducts = true }, label = { Text("Produk terjual") })
             }
-            ErrorText(model.error)
+            if (saleToDelete == null) ErrorText(model.error)
         }
         if (report.sales.isEmpty()) {
             item { EmptyPanel("Tidak ada transaksi", "Tidak ada penjualan pada tanggal ini.") }
@@ -383,23 +386,75 @@ internal fun HistoryScreen(model: RegisterModel) {
             }
         } else items(report.sales, key = { it.id }) { sale ->
             Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
-                Row(
-                    Modifier.fillMaxWidth().clickable(enabled = !model.busy) { model.openReceipt(sale.id) }.padding(14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(ticket(sale.id), fontWeight = FontWeight.Bold)
-                        Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.labelSmall)
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().clickable(enabled = !model.busy) { model.openReceipt(sale.id) }.padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(ticket(sale.id), fontWeight = FontWeight.Bold)
+                            Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(rupiah(sale.total), color = Pine, fontWeight = FontWeight.Bold)
+                            Text(sale.method, color = Muted, style = MaterialTheme.typography.labelSmall)
+                        }
+                        Text("›", color = Pine)
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(rupiah(sale.total), color = Pine, fontWeight = FontWeight.Bold)
-                        Text(sale.method, color = Muted, style = MaterialTheme.typography.labelSmall)
-                    }
-                    Text("›", color = Pine)
+                    TextButton(
+                        onClick = { model.previewSaleDeletion(sale) { saleToDelete = it } },
+                        enabled = !model.busy,
+                        modifier = Modifier.align(Alignment.End).padding(horizontal = 14.dp)
+                    ) { Text("Hapus transaksi", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
     }
+    saleToDelete?.let { deletion ->
+        DeleteSaleDialog(deletion, model) {
+            model.clearError()
+            saleToDelete = null
+        }
+    }
+}
+
+@Composable
+private fun DeleteSaleDialog(deletion: SaleDeletion, model: RegisterModel, onDismiss: () -> Unit) {
+    val sale = deletion.sale
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { if (!model.busy) onDismiss() },
+        title = { Text("Hapus transaksi?") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("${ticket(sale.id)} senilai ${rupiah(sale.total)} akan dihapus dari riwayat dan laporan penjualan.")
+                Text(if (sale.ingredientDeductions == null && sale.productDeductions == null) {
+                    "Catatan stok tidak tersedia untuk transaksi lama ini. Sesuaikan stok secara manual jika diperlukan."
+                } else {
+                    "Stok akan dikembalikan untuk bahan dan produk yang masih tersedia. Penghapusan tidak dapat dibatalkan."
+                })
+                if (deletion.countedIngredients.isNotEmpty()) {
+                    val names = deletion.countedIngredients.joinToString(", ") { it.name }
+                    Text("Stok bahan berikut tidak dikembalikan karena sudah dihitung lewat stok opname setelah transaksi: $names.")
+                }
+                Text("Masukkan PIN pemilik untuk mengonfirmasi.")
+                PinInput(pin, "PIN pemilik", !model.busy, model.error != null, ImeAction.Done, KeyboardActions()) {
+                    pin = it
+                    model.clearError()
+                }
+                ErrorText(model.error)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                model.deleteSale(deletion, pin, onDismiss)
+                pin = ""
+            }, enabled = !model.busy && pin.length == 6) {
+                Text(if (model.busy) "Menghapus…" else "Hapus")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !model.busy) { Text("Batal") } }
+    )
 }
 
 @Composable
