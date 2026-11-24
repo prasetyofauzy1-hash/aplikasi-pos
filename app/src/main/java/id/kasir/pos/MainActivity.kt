@@ -1,7 +1,9 @@
 package id.kasir.pos
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -86,6 +88,7 @@ private fun RegisterApp(model: RegisterModel) {
     val products = remember(menu, cart) { availableCatalog(menu, cart) }
     var tab by rememberSaveable { mutableStateOf(Tab.REGISTER) }
     var orderScreen by rememberSaveable { mutableStateOf("") }
+    var cashierQuery by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedId = editingId
     var showIngredients by rememberSaveable { mutableStateOf(false) }
@@ -135,7 +138,7 @@ private fun RegisterApp(model: RegisterModel) {
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
-                receipt != null -> ReceiptScreen(receipt, closeSubScreen)
+                receipt != null -> ReceiptScreen(receipt, fromCheckout = tab == Tab.REGISTER, onDone = closeSubScreen)
                 selectedId != null -> {
                     val item = if (selectedId == 0L) MenuItem(Product(name = "", category = "", price = 0, stock = 0), emptyList())
                     else menu.firstOrNull { it.product.id == selectedId }
@@ -160,8 +163,12 @@ private fun RegisterApp(model: RegisterModel) {
                 }
                 showIngredients -> IngredientStockScreen(ingredients, model, onEdit = { editingIngredient = it })
                 orderScreen == "cart" -> CartScreen(products, model, onPay = { orderScreen = "payment" })
-                orderScreen == "payment" -> PaymentScreen(products, model, onPaid = { orderScreen = "" })
-                tab == Tab.REGISTER -> CashierScreen(products, model, onCart = { orderScreen = "cart" })
+                orderScreen == "payment" -> PaymentScreen(products, model, onPaid = {
+                    cashierQuery = ""
+                    orderScreen = ""
+                })
+                tab == Tab.REGISTER -> CashierScreen(products, model, cashierQuery, onQueryChange = { cashierQuery = it },
+                    onCart = { orderScreen = "cart" })
                 tab == Tab.PRODUCTS -> productsState.SaveableStateProvider("products") {
                     ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
                 }
@@ -280,4 +287,21 @@ internal fun ShareReceiptButton(receipt: Receipt) {
         }
         context.startActivity(Intent.createChooser(share, "Bagikan struk"))
     }) { Text("Bagikan struk") }
+}
+
+@Composable
+internal fun EmailReceiptButton(receipt: Receipt) {
+    val context = LocalContext.current
+    var emailUnavailable by remember { mutableStateOf(false) }
+    OutlinedButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = {
+        val subject = Uri.encode("Struk ${ticket(receipt.sale.id)} • ${receipt.sale.storeName}")
+        val body = Uri.encode(receipt.asText())
+        try {
+            context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:?subject=$subject&body=$body")))
+            emailUnavailable = false
+        } catch (_: ActivityNotFoundException) {
+            emailUnavailable = true
+        }
+    }) { Text("Kirim via Email") }
+    if (emailUnavailable) ErrorText("Tidak ada aplikasi email. Pasang aplikasi email atau pilih Bagikan struk.")
 }
