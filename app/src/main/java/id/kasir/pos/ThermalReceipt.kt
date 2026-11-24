@@ -88,7 +88,9 @@ private class ThermalDocument(private val width: Int) {
         if (remaining.isNotEmpty()) output.appendLine(remaining)
     }
 
-    fun row(label: String, amount: String) {
+    fun row(rawLabel: String, rawAmount: String) {
+        val label = rawLabel.printerText()
+        val amount = rawAmount.printerText()
         val space = width - label.length - amount.length
         if (space > 0) {
             output.appendLine(label + " ".repeat(space) + amount)
