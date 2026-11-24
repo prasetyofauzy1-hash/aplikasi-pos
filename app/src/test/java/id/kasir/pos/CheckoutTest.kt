@@ -47,7 +47,7 @@ class CheckoutTest {
         val order = calculateCheckout(listOf(premium), cart, Payment.CASH, 10_000_000_000_000)
 
         assertEquals(9_998_999_990_001L, order.total)
-        assertEquals(order.total, cartTotal(listOf(premium), cart))
+        assertEquals(order.total, cartSubtotal(listOf(premium), listOf(CartItem(productId = 3, quantity = 9_999))))
         assertEquals(1_000_009_999L, order.paid - order.total)
         assertEquals("Rp9.998.999.990.001", rupiah(order.total))
     }

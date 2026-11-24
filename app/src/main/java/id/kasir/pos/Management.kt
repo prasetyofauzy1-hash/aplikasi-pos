@@ -28,6 +28,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -139,6 +141,12 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
     var category by rememberSaveable { mutableStateOf(product.category) }
     var price by rememberSaveable { mutableStateOf(if (isNew) "" else product.price.toString()) }
     var stock by rememberSaveable { mutableStateOf(product.stock.toString()) }
+    var optionDraft by rememberSaveable { mutableStateOf(formatOptionDraft(parseProductOptions(product.options))) }
+    var promoMode by rememberSaveable { mutableIntStateOf(if (product.promoPercent > 0) 1 else if (product.promoAmount > 0) 2 else 0) }
+    var promoInput by rememberSaveable {
+        mutableStateOf(when { product.promoPercent > 0 -> percentLabel(product.promoPercent).removeSuffix("%")
+            product.promoAmount > 0 -> product.promoAmount.toString(); else -> "" })
+    }
     var draft by rememberSaveable(stateSaver = recipeSaver) {
         mutableStateOf(item.recipe.associate { it.ingredient.id to it.line.quantity.toString() })
     }
@@ -149,6 +157,12 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
     val recipe = draft.mapNotNull { (id, amount) ->
         amount.toIntOrNull()?.takeIf { it in 1..MAX_INGREDIENT_STOCK }?.let { id to it }
     }.toMap()
+    val options = parseOptionDraft(optionDraft)
+    val promo = when (promoMode) {
+        1 -> parsePercent(promoInput)?.let { Discount(percent = it) }
+        2 -> parseRupiah(promoInput, maxDigits = 9)?.takeIf { it > 0 && (numericPrice == null || it <= numericPrice) }?.let { Discount(amount = it) }
+        else -> Discount()
+    }
     val validRecipe = recipe.isNotEmpty() && recipe.size == draft.size && recipe.keys.all { id -> ingredients.any { it.id == id } }
     Column(Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -159,6 +173,28 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
             prefix = { if (!price.trimStart().startsWith("Rp", ignoreCase = true)) Text("Rp ") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         if (price.isNotBlank() && numericPrice == null) ErrorText("Gunakan format Rupiah hingga 9 digit, misalnya Rp19.000,00.")
+        Text("Promo produk", fontWeight = FontWeight.Bold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Tanpa promo", "Persen", "Potongan Rp").forEachIndexed { index, label ->
+                FilterChip(selected = promoMode == index, onClick = { promoMode = index; promoInput = "" }, label = { Text(label) })
+            }
+        }
+        if (promoMode != 0) {
+            OutlinedTextField(promoInput, { promoInput = it }, Modifier.fillMaxWidth(),
+                label = { Text(if (promoMode == 1) "Diskon per barang" else "Potongan per barang") },
+                prefix = { if (promoMode == 2) Text("Rp ") }, suffix = { if (promoMode == 1) Text("%") }, singleLine = true,
+                supportingText = {
+                    val final = if (promo != null && numericPrice != null) numericPrice - promo.of(numericPrice) else null
+                    Text(if (final != null) "Harga setelah promo: ${rupiah(final)}" else "Promo dipotong otomatis saat checkout.")
+                },
+                isError = promoInput.isNotBlank() && promo == null,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+        }
+        OutlinedTextField(optionDraft, { optionDraft = it.take(600) }, Modifier.fillMaxWidth(), label = { Text("Varian (opsional)") },
+            placeholder = { Text("Less sugar\nCup besar +5000") }, minLines = 2,
+            supportingText = { Text(if (options == null) "Satu varian per baris, nama tidak boleh sama. Tambahan harga: +5000."
+                else "Satu varian per baris. Tulis +5000 untuk tambahan harga.") },
+            isError = options == null)
         if (useDirectStock) {
             OutlinedTextField(stock, { if (it.length <= 5 && it.all { c -> c in '0'..'9' }) stock = it }, Modifier.fillMaxWidth(),
                 label = { Text("Stok produk") }, supportingText = { Text("Stok langsung dipakai sampai resep ditambahkan.") },
@@ -168,14 +204,15 @@ internal fun ProductForm(item: MenuItem, ingredients: List<Ingredient>, model: R
         ErrorText(model.error)
         Button(
             onClick = {
-                if (numericPrice != null && (validRecipe || (useDirectStock && numericStock != null))) {
+                if (numericPrice != null && promo != null && options != null && (validRecipe || (useDirectStock && numericStock != null))) {
                     model.saveProduct(
-                        product.copy(name = name.trim(), category = category.trim(), price = numericPrice, stock = numericStock ?: 0),
+                        product.copy(name = name.trim(), category = category.trim(), price = numericPrice, stock = numericStock ?: 0,
+                            options = formatProductOptions(options), promoPercent = promo.percent, promoAmount = promo.amount),
                         recipe, onClose
                     )
                 }
             },
-            enabled = !model.busy && name.isNotBlank() && category.isNotBlank() && numericPrice != null &&
+            enabled = !model.busy && name.isNotBlank() && category.isNotBlank() && numericPrice != null && promo != null && options != null &&
                 (validRecipe || (useDirectStock && numericStock != null)),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text("Simpan produk") }
@@ -387,9 +424,14 @@ internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout:
                 }
                 HorizontalDivider(color = Line)
                 receipt.lines.forEach { line ->
-                    MetricRow("${line.quantity} × ${line.productName}", rupiah(line.quantity * line.unitPrice))
+                    Column {
+                        MetricRow("${line.quantity} × ${line.productName}", rupiah(line.quantity * (line.unitPrice + line.discount)))
+                        line.detailLines().forEach { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
+                    }
                 }
                 HorizontalDivider(color = Line)
+                if (receipt.hasAdjustments) MetricRow("Subtotal", rupiah(sale.subtotal))
+                receipt.charges.forEach { MetricRow(it.name, rupiah(it.amount)) }
                 MetricRow("Total", rupiah(sale.total), strong = true)
                 MetricRow(sale.method, rupiah(sale.paid))
                 if (sale.method == Payment.CASH.label) MetricRow("Kembalian", rupiah(sale.paid - sale.total))
@@ -498,6 +540,8 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text("Simpan profil toko") }
         HorizontalDivider(color = Line)
+        ExtraChargeSettings(model)
+        HorizontalDivider(color = Line)
         PrinterSettings(model)
         HorizontalDivider(color = Line)
         EmptyPanel("Akses pemilik", "Satu PIN untuk mengunci akses kasir di perangkat ini.")
@@ -513,4 +557,49 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         OutlinedButton(onClick = model::lock, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Kunci aplikasi") }
         Spacer(Modifier.height(8.dp))
     }
+}
+
+@Composable
+private fun ExtraChargeSettings(model: RegisterModel) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var percentMode by rememberSaveable { mutableStateOf(true) }
+    var value by rememberSaveable { mutableStateOf("") }
+    val charges = model.extraCharges
+    val percent = if (percentMode) parsePercent(value) else null
+    val amount = if (percentMode) null else parseRupiah(value, maxDigits = 9)?.takeIf { it > 0 }
+    val valid = name.isNotBlank() && (percent != null || amount != null) && charges.none { it.name.equals(name.trim(), true) }
+    EmptyPanel("Biaya tambahan", "PPN atau biaya layanan ditambahkan ke total transaksi baru saat diaktifkan.")
+    charges.forEachIndexed { index, charge ->
+        Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(charge.name, fontWeight = FontWeight.Bold)
+                    Text(if (charge.percent > 0) "${percentLabel(charge.percent)} dari subtotal" else "${rupiah(charge.amount)} per transaksi",
+                        color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = charge.enabled, enabled = !model.busy, onCheckedChange = { on ->
+                    model.saveExtraCharges(charges.toMutableList().also { it[index] = charge.copy(enabled = on) })
+                }, modifier = Modifier.semantics { contentDescription = "Aktifkan ${charge.name}" })
+                TextButton(onClick = { model.saveExtraCharges(charges.filterIndexed { i, _ -> i != index }) }, enabled = !model.busy) {
+                    Text("Hapus")
+                }
+            }
+        }
+    }
+    OutlinedTextField(name, { name = cleanOptionText(it, 30) }, Modifier.fillMaxWidth(), label = { Text("Nama biaya") },
+        placeholder = { Text("Mis. PPN atau Biaya layanan") }, enabled = !model.busy, singleLine = true)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = percentMode, onClick = { percentMode = true; value = "" }, label = { Text("Persen") })
+        FilterChip(selected = !percentMode, onClick = { percentMode = false; value = "" }, label = { Text("Nominal Rp") })
+    }
+    OutlinedTextField(value, { value = it }, Modifier.fillMaxWidth(), label = { Text(if (percentMode) "Besaran persen" else "Nominal per transaksi") },
+        prefix = { if (!percentMode) Text("Rp ") }, suffix = { if (percentMode) Text("%") }, enabled = !model.busy, singleLine = true,
+        isError = value.isNotBlank() && percent == null && amount == null,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+    OutlinedButton(
+        onClick = {
+            model.saveExtraCharges(charges + ExtraCharge(name.trim(), percent ?: 0, amount ?: 0)) { name = ""; value = "" }
+        },
+        enabled = valid && !model.busy, modifier = Modifier.fillMaxWidth()
+    ) { Text("Tambah biaya") }
 }

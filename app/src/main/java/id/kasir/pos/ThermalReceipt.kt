@@ -40,9 +40,12 @@ internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper): ByteArray = 
     divider()
     receipt.lines.forEach { item ->
         line(item.productName)
-        row("${item.quantity} x ${rupiah(item.unitPrice)}", rupiah(item.quantity * item.unitPrice))
+        row("${item.quantity} x ${rupiah(item.unitPrice + item.discount)}", rupiah(item.quantity * (item.unitPrice + item.discount)))
+        item.detailLines().forEach { line(it) }
     }
     divider()
+    if (receipt.hasAdjustments) row("Subtotal", rupiah(sale.subtotal))
+    receipt.charges.forEach { row(it.name, rupiah(it.amount)) }
     row("Total", rupiah(sale.total))
     line("Pembayaran: ${sale.method}")
     if (sale.method == Payment.CASH.label) {

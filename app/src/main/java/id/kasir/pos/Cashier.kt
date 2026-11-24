@@ -2,6 +2,8 @@ package id.kasir.pos
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -43,7 +46,7 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalLayoutApi::class)
 internal fun CashierScreen(
     products: List<Product>,
-    cart: Map<Long, Int>,
+    cart: List<CartItem>,
     model: RegisterModel,
     query: String,
     onQueryChange: (String) -> Unit,
@@ -54,7 +57,9 @@ internal fun CashierScreen(
     val focusManager = LocalFocusManager.current
     val results = products.filter { it.name.contains(query.trim(), true) || it.category.contains(query.trim(), true) }
     val count = cartItemCount(cart)
-    val total = cartTotal(products, cart)
+    val total = cartSubtotal(products, cart)
+    val quantities = cartQuantities(cart)
+    var choosingId by rememberSaveable { mutableStateOf<Long?>(null) }
     Column(Modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
@@ -94,7 +99,9 @@ internal fun CashierScreen(
                 EmptyPanel("Produk tidak ditemukan", "Coba kata kunci lain atau tambahkan produk di tab Produk.")
             }
             items(results, key = { it.id }) { product ->
-                CatalogCard(product, cart[product.id] ?: 0) { model.adjust(product, 1) }
+                CatalogCard(product, quantities[product.id] ?: 0, onChoose = { choosingId = product.id }) {
+                    if (parseProductOptions(product.options).isEmpty()) model.addToCart(product) else choosingId = product.id
+                }
             }
         }
         if (!searching && (!compact || cart.isNotEmpty())) Surface(color = Paper) {
@@ -126,12 +133,54 @@ internal fun CashierScreen(
             }
         }
     }
+    products.firstOrNull { it.id == choosingId }?.let { product ->
+        OrderOptionsDialog(product, onDismiss = { choosingId = null }) { options, note ->
+            model.addToCart(product, options, note)
+            choosingId = null
+        }
+    }
 }
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
-private fun CatalogCard(product: Product, quantity: Int, onAdd: () -> Unit) {
-    Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
+private fun OrderOptionsDialog(product: Product, onDismiss: () -> Unit, onAdd: (List<String>, String) -> Unit) {
+    val options = parseProductOptions(product.options)
+    var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
+    var note by rememberSaveable { mutableStateOf("") }
+    val price = product.price - product.promoPerUnit + options.filter { it.name in selected }.sumOf { it.extraPrice }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(product.name) },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (options.isNotEmpty()) {
+                    Text("Varian", fontWeight = FontWeight.Bold)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        options.forEach { option ->
+                            val on = option.name in selected
+                            FilterChip(selected = on, onClick = { selected = if (on) selected - option.name else selected + option.name },
+                                label = { Text(if (option.extraPrice > 0) "${option.name} +${rupiah(option.extraPrice)}" else option.name) })
+                        }
+                    }
+                }
+                OutlinedTextField(note, { note = cleanOptionText(it, 80) }, Modifier.fillMaxWidth(),
+                    label = { Text("Catatan pesanan") }, placeholder = { Text("Mis. less sugar, tanpa es") }, singleLine = true)
+                Text("${rupiah(price)} per barang", color = Pine, fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onAdd(options.map { it.name }.filter { it in selected }, note) }, enabled = product.stock > 0) {
+                Text("Tambah ke keranjang")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } }
+    )
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
+private fun CatalogCard(product: Product, quantity: Int, onChoose: () -> Unit, onAdd: () -> Unit) {
+    Surface(onClick = onChoose, enabled = quantity < product.stock, shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
         Column(Modifier.fillMaxWidth().padding(11.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 CategoryMark(product.category)
@@ -144,8 +193,12 @@ private fun CatalogCard(product: Product, quantity: Int, onAdd: () -> Unit) {
             Text(product.category, color = Muted, style = MaterialTheme.typography.labelSmall,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(rupiah(product.price), modifier = Modifier.align(Alignment.CenterVertically), fontWeight = FontWeight.Bold,
-                    color = Pine, style = MaterialTheme.typography.bodySmall)
+                Column(Modifier.align(Alignment.CenterVertically)) {
+                    if (product.promoPerUnit > 0) Text(rupiah(product.price), color = Muted, style = MaterialTheme.typography.labelSmall,
+                        textDecoration = TextDecoration.LineThrough)
+                    Text(rupiah(product.price - product.promoPerUnit), fontWeight = FontWeight.Bold,
+                        color = Pine, style = MaterialTheme.typography.bodySmall)
+                }
                 FilledTonalIconButton(
                     onClick = onAdd, enabled = quantity < product.stock,
                     modifier = Modifier.align(Alignment.CenterVertically),
@@ -169,16 +222,18 @@ internal fun CategoryMark(category: String) {
     }
 }
 
-internal fun cartTotal(products: List<Product>, cart: Map<Long, Int>) =
-    products.sumOf { it.price * (cart[it.id] ?: 0) }
+internal fun cartIssue(products: List<Product>, cart: List<CartItem>) =
+    cartStockIssue(products, cartQuantities(cart)) ?: cartOptionIssue(products, cart)
 
 @Composable
-internal fun CartScreen(products: List<Product>, cart: Map<Long, Int>, model: RegisterModel, short: Boolean, onPay: () -> Unit) {
+internal fun CartScreen(products: List<Product>, cart: List<CartItem>, model: RegisterModel, short: Boolean, onPay: () -> Unit) {
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
-    val listed = products.filter { it.id in cart }
+    val byId = products.associateBy { it.id }
+    val listed = cart.filter { it.productId in byId }
+    val quantities = cartQuantities(cart)
     val count = cartItemCount(cart)
-    val total = cartTotal(products, cart)
-    val stockIssue = cartStockIssue(products, cart)
+    val total = cartSubtotal(products, cart)
+    val stockIssue = cartIssue(products, cart)
     Column(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item {
@@ -188,25 +243,31 @@ internal fun CartScreen(products: List<Product>, cart: Map<Long, Int>, model: Re
                 ErrorText(stockIssue)
             }
             if (listed.isEmpty()) item { EmptyPanel("Belum ada barang", "Kembali ke kasir dan pilih produk.") }
-            items(listed, key = { it.id }) { product ->
-                val qty = cart[product.id] ?: 0
+            items(listed, key = { it.id }) { line ->
+                val product = byId.getValue(line.productId)
+                val qty = line.quantity
+                val unitPrice = cartLineUnitPrice(product, line)
+                val details = (selectedOptionNames(line.options) + listOfNotNull(line.note.takeIf { it.isNotBlank() }?.let { "Catatan: $it" }))
                 Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(product.name, fontWeight = FontWeight.Bold)
-                            Text("${rupiah(product.price)} per barang", color = Muted, style = MaterialTheme.typography.bodySmall)
+                            details.forEach { Text(it, color = Pine, style = MaterialTheme.typography.bodySmall) }
+                            Text(if (unitPrice == null) "Pilihan sudah berubah" else "${rupiah(unitPrice)} per barang" +
+                                if (product.promoPerUnit > 0) " (promo −${rupiah(product.promoPerUnit)})" else "",
+                                color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
-                        IconButton(onClick = { model.adjust(product, -1) }) {
+                        IconButton(onClick = { model.adjustLine(line, -1) }) {
                             Text("−", Modifier.semantics { contentDescription = "Kurangi ${product.name}" }, fontSize = 22.sp)
                         }
                         OutlinedButton(
-                            onClick = { editingId = product.id },
+                            onClick = { editingId = line.id },
                             contentPadding = PaddingValues(horizontal = 8.dp),
                             modifier = Modifier.defaultMinSize(minWidth = 48.dp)
                                 .semantics { contentDescription = "Ubah jumlah ${product.name}" }
                         ) { Text("$qty", fontWeight = FontWeight.Bold) }
-                        IconButton(onClick = { model.adjust(product, 1) }, enabled = qty < product.stock) {
+                        IconButton(onClick = { model.adjustLine(line, 1) }, enabled = (quantities[product.id] ?: 0) < product.stock) {
                             Icon(Icons.Default.Add, "Tambah ${product.name}")
                         }
                     }
@@ -224,9 +285,11 @@ internal fun CartScreen(products: List<Product>, cart: Map<Long, Int>, model: Re
             }
         }
     }
-    listed.firstOrNull { it.id == editingId }?.let { product ->
-        QuantityDialog(product, cart.getValue(product.id), onDismiss = { editingId = null }) { quantity ->
-            model.setQuantity(product, quantity)
+    listed.firstOrNull { it.id == editingId }?.let { line ->
+        val product = byId.getValue(line.productId)
+        val others = (quantities[product.id] ?: 0) - line.quantity
+        QuantityDialog(product.copy(stock = product.stock - others), line.quantity, onDismiss = { editingId = null }) { quantity ->
+            model.setLineQuantity(line, quantity)
             editingId = null
         }
     }
@@ -270,7 +333,7 @@ private fun QuantityDialog(product: Product, quantity: Int, onDismiss: () -> Uni
 }
 
 @Composable
-internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model: RegisterModel, onPaid: () -> Unit) {
+internal fun PaymentScreen(products: List<Product>, cart: List<CartItem>, model: RegisterModel, onPaid: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().navigationBarsPadding()) {
         PaymentContent(products, cart, model, (maxHeight - 24.dp).coerceAtLeast(0.dp), onPaid)
     }
@@ -279,12 +342,13 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
 private fun PaymentContent(
-    products: List<Product>, cart: Map<Long, Int>, model: RegisterModel, maxQrSide: Dp, onPaid: () -> Unit
+    products: List<Product>, cart: List<CartItem>, model: RegisterModel, maxQrSide: Dp, onPaid: () -> Unit
 ) {
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
-    val total = cartTotal(products, cart)
-    val stockIssue = cartStockIssue(products, cart)
+    val totals = runCatching { orderTotals(cartSubtotal(products, cart), model.extraCharges) }
+    val total = totals.getOrNull()?.total ?: 0
+    val stockIssue = cartIssue(products, cart) ?: totals.exceptionOrNull()?.message
     val cash = parseRupiah(amount, maxDigits = 18)
     val focusManager = LocalFocusManager.current
     val setCash: (Long) -> Unit = {
@@ -300,6 +364,10 @@ private fun PaymentContent(
         if (stockIssue != null || cart.isEmpty()) {
             EmptyPanel("Pembayaran belum tersedia", stockIssue ?: "Keranjang masih kosong.")
             return@Column
+        }
+        totals.getOrNull()?.takeIf { it.charges.isNotEmpty() }?.let { order ->
+            MetricRow("Subtotal", rupiah(order.subtotal))
+            order.charges.forEach { MetricRow(it.name, rupiah(it.amount)) }
         }
         TotalBanner("Total yang harus dibayar", total)
         Text("Metode pembayaran", fontWeight = FontWeight.Bold)

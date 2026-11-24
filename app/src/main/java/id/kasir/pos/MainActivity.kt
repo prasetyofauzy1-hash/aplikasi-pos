@@ -91,7 +91,7 @@ private fun RegisterApp(model: RegisterModel) {
     val menu by model.menu.collectAsStateWithLifecycle()
     val ingredients by model.ingredients.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
-    val products = remember(menu, cart) { availableCatalog(menu, cart) }
+    val products = remember(menu, cart) { availableCatalog(menu, cartQuantities(cart)) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     var showEmailLink by rememberSaveable {
         mutableStateOf(model.initialOwnerEmailOffer)
