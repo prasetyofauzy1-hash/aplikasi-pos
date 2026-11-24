@@ -194,6 +194,7 @@ internal fun HistoryScreen(sales: List<Sale>, model: RegisterModel) {
                         }
                     }
                 }
+                SalesExportButton(model)
             }
         }
         item {

@@ -14,8 +14,10 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,6 +38,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val sales = dao.sales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     var pinConfigured by mutableStateOf(preferences.contains("pinHash"))
         private set
@@ -46,8 +50,6 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         preferences.getString("address", null).orEmpty(),
         preferences.getString("logo", null).orEmpty()
     ))
-        private set
-    var cart by mutableStateOf<Map<Long, Int>>(emptyMap())
         private set
     var receipt by mutableStateOf<Receipt?>(null)
         private set
@@ -135,18 +137,36 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun adjust(product: Product, delta: Int) {
-        setQuantity(product, ((cart[product.id] ?: 0) + delta).coerceAtLeast(0))
-    }
+    fun adjust(product: Product, delta: Int) =
+        changeCartQuantity(product) { (it.toLong() + delta).coerceAtLeast(0L) }
 
-    fun setQuantity(product: Product, quantity: Int) {
+    fun setQuantity(product: Product, quantity: Int) = changeCartQuantity(product) { quantity.toLong() }
+
+    private fun changeCartQuantity(product: Product, quantity: (Int) -> Long) {
         if (busy) return
-        val current = cart[product.id] ?: 0
-        val available = if (quantity > current) {
-            val items = menu.value
-            items.firstOrNull { it.product.id == product.id }?.availableStock(ingredientDemand(items, cart), current) ?: 0
-        } else product.stock
-        cart = updateCartQuantity(cart, product.copy(stock = available), quantity)
+        viewModelScope.launch {
+            try {
+                database.withTransaction {
+                    val previous = dao.cartSnapshot().associate { it.productId to it.quantity }
+                    val old = previous[product.id]
+                    val next = quantity(old ?: 0)
+                    if (next !in 0L..Int.MAX_VALUE.toLong()) return@withTransaction
+                    val available = if (next > (old ?: 0)) {
+                        val items = dao.menuById(previous.keys + product.id)
+                        items.firstOrNull { it.product.id == product.id }
+                            ?.availableStock(ingredientDemand(items, previous), old ?: 0) ?: 0
+                    } else product.stock
+                    val updated = updateCartQuantity(previous, product.copy(stock = available), next.toInt())[product.id]
+                    if (updated == old) return@withTransaction
+                    if (updated == null) dao.removeCartItem(product.id)
+                    else dao.putCartItem(CartItem(product.id, updated))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                error = "Keranjang tidak dapat diperbarui."
+            }
+        }
     }
 
     fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
@@ -163,12 +183,12 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 product.id
             }
             dao.deleteRecipe(id)
-            if (recipe.isNotEmpty()) dao.addRecipe(recipe.map { (ingredientId, quantity) -> RecipeLine(id, ingredientId, quantity) })
-        }
-        if (recipe.isEmpty()) {
-            val inCart = cart[product.id] ?: 0
-            if (product.stock == 0) cart = cart - product.id
-            else if (inCart > product.stock) cart = cart + (product.id to product.stock)
+            if (recipe.isNotEmpty()) {
+                dao.addRecipe(recipe.map { (ingredientId, quantity) -> RecipeLine(id, ingredientId, quantity) })
+            } else {
+                if (product.stock == 0) dao.removeCartItem(product.id)
+                else dao.capCartQuantity(product.id, product.stock)
+            }
         }
         onDone()
     }
@@ -201,21 +221,27 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat dihapus.") {
         dao.delete(product.id)
-        cart = cart - product.id
         onDone()
     }
 
-    fun sell(total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) = runAction("Transaksi tidak dapat disimpan.") {
-        receipt = register.sell(cart, total, payment, cash, profile)
-        cart = emptyMap()
-        onDone()
-    }
+    fun sell(cart: Map<Long, Int>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
+        runAction("Transaksi tidak dapat disimpan.") {
+            receipt = register.sell(cart, total, payment, cash, profile)
+            onDone()
+        }
 
     fun openReceipt(id: Long) = runAction("Struk tidak dapat dibuka.") {
         receipt = dao.receipt(id) ?: throw SaleInputException("Struk tidak ditemukan.")
     }
 
     fun closeReceipt() { receipt = null }
+
+    internal fun exportSales(period: SalesExportPeriod, onReady: (Uri) -> Unit) =
+        runAction("CSV penjualan tidak dapat dibagikan. Coba lagi.") {
+            val receipts = dao.receiptsForExport(period.start, period.endExclusive)
+            val uri = withContext(Dispatchers.IO) { writeSalesCsv(getApplication(), period, receipts) }
+            onReady(uri)
+        }
 
     fun saveProfile(name: String, address: String, newLogo: Uri?, removeLogo: Boolean, onDone: () -> Unit) =
         runAction("Pengaturan tidak dapat disimpan. Periksa kembali file logo.") {
@@ -239,7 +265,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 work()
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: SaleInputException) {
                 error = e.message
