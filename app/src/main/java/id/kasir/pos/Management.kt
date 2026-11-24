@@ -1,13 +1,11 @@
 package id.kasir.pos
 
-import android.app.DatePickerDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.net.Uri
-import android.view.ContextThemeWrapper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -33,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -41,7 +40,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.util.Calendar
 import java.util.TimeZone
 
 @Composable
@@ -188,26 +186,37 @@ private fun rememberReportClock(): State<Pair<Long, TimeZone>> {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReportDateControls(date: Long, today: Long, onSelect: (Long) -> Unit) {
-    val context = LocalContext.current
     var choosingDate by rememberSaveable { mutableStateOf(false) }
     if (choosingDate) {
-        DisposableEffect(context, date) {
-            val calendar = reportCalendar(date)
-            val dialogContext = ContextThemeWrapper(context, context.theme).apply {
-                applyOverrideConfiguration(Configuration().apply { setLocale(indonesia) })
-            }
-            val dialog = DatePickerDialog(
-                dialogContext,
-                { _, year, month, day -> onSelect(reportDate(year, month, day)) },
-                calendar[Calendar.YEAR], calendar[Calendar.MONTH], calendar[Calendar.DAY_OF_MONTH]
-            )
-            dialog.setOnDismissListener { choosingDate = false }
-            dialog.show()
-            onDispose {
-                dialog.setOnDismissListener(null)
-                dialog.dismiss()
+        val picker = remember(date) { DatePickerState(locale = indonesia, initialSelectedDateMillis = date) }
+        val configuration = LocalConfiguration.current
+        val localized = remember(configuration) { Configuration(configuration).apply { setLocale(indonesia) } }
+        DatePickerDialog(
+            onDismissRequest = { choosingDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    picker.selectedDateMillis?.let(onSelect)
+                    choosingDate = false
+                }) { Text("Pilih") }
+            },
+            dismissButton = { TextButton(onClick = { choosingDate = false }) { Text("Batal") } }
+        ) {
+            CompositionLocalProvider(LocalConfiguration provides localized) {
+                DatePicker(
+                    state = picker,
+                    title = { Text("Pilih tanggal", modifier = Modifier.padding(start = 24.dp, top = 16.dp)) },
+                    headline = {
+                        Text(
+                            picker.selectedDateMillis?.let(::reportDateLabel).orEmpty(),
+                            modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
+                            style = MaterialTheme.typography.headlineSmall
+                        )
+                    },
+                    showModeToggle = false
+                )
             }
         }
     }

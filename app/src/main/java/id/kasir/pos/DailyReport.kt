@@ -6,7 +6,7 @@ import java.util.TimeZone
 
 private val reportUtc = TimeZone.getTimeZone("UTC")
 
-internal fun reportCalendar(date: Long): Calendar =
+private fun reportCalendar(date: Long): Calendar =
     Calendar.getInstance(reportUtc).apply { timeInMillis = date }
 
 internal fun reportDate(year: Int, month: Int, day: Int): Long =
