@@ -1,6 +1,7 @@
 package id.kasir.pos
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Embedded
@@ -15,7 +16,6 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Update
-import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -30,13 +30,23 @@ data class Product(
     val name: String,
     val category: String,
     val price: Long,
-    val stock: Int
+    val stock: Int,
+    @ColumnInfo(defaultValue = "") val options: String = "",
+    @ColumnInfo(defaultValue = "0") val promoPercent: Int = 0,
+    @ColumnInfo(defaultValue = "0") val promoAmount: Long = 0
 )
 
-@Entity(foreignKeys = [ForeignKey(
-    entity = Product::class, parentColumns = ["id"], childColumns = ["productId"], onDelete = ForeignKey.CASCADE
-)])
-data class CartItem(@PrimaryKey val productId: Long, val quantity: Int)
+@Entity(
+    foreignKeys = [ForeignKey(entity = Product::class, parentColumns = ["id"], childColumns = ["productId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index(value = ["productId", "options", "note"], unique = true)]
+)
+data class CartItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val productId: Long,
+    val quantity: Int,
+    val options: String = "",
+    val note: String = ""
+)
 
 const val OWNER_CASHIER_ID = 1L
 
@@ -58,7 +68,8 @@ data class Sale(
     val storeName: String,
     val storeAddress: String,
     val logoName: String,
-    val cashierName: String? = null
+    val cashierName: String? = null,
+    @ColumnInfo(defaultValue = "0") val subtotal: Long = total
 ) {
     val cashierLabel: String? get() = cashierName?.let { "Kasir: $it" }
 }
@@ -73,10 +84,28 @@ data class SaleLine(
     val productName: String,
     val unitPrice: Long,
     val quantity: Int,
-    val productId: Long? = null
+    val productId: Long? = null,
+    @ColumnInfo(defaultValue = "") val options: String = "",
+    @ColumnInfo(defaultValue = "") val note: String = "",
+    @ColumnInfo(defaultValue = "0") val discount: Long = 0
 )
 
-data class Receipt(@Embedded val sale: Sale, @Relation(parentColumn = "id", entityColumn = "saleId") val lines: List<SaleLine>)
+@Entity(
+    foreignKeys = [ForeignKey(entity = Sale::class, parentColumns = ["id"], childColumns = ["saleId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("saleId")]
+)
+data class SaleCharge(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val saleId: Long,
+    val name: String,
+    val amount: Long
+)
+
+data class Receipt(
+    @Embedded val sale: Sale,
+    @Relation(parentColumn = "id", entityColumn = "saleId") val lines: List<SaleLine>,
+    @Relation(parentColumn = "id", entityColumn = "saleId") val charges: List<SaleCharge> = emptyList()
+)
 
 @Dao
 interface PosDao {
@@ -92,10 +121,10 @@ interface PosDao {
     @Query("DELETE FROM Product WHERE id = :id") suspend fun delete(id: Long)
     @Query("SELECT * FROM CartItem") fun cart(): Flow<List<CartItem>>
     @Query("SELECT * FROM CartItem") suspend fun cartSnapshot(): List<CartItem>
-    @Upsert suspend fun putCartItem(item: CartItem)
+    @Insert suspend fun addCartItem(item: CartItem): Long
+    @Query("UPDATE CartItem SET quantity = :quantity WHERE id = :id") suspend fun setCartQuantity(id: Long, quantity: Int)
+    @Query("DELETE FROM CartItem WHERE id = :id") suspend fun removeCartLine(id: Long)
     @Query("DELETE FROM CartItem WHERE productId = :id") suspend fun removeCartItem(id: Long)
-    @Query("UPDATE CartItem SET quantity = MIN(quantity, :stock) WHERE productId = :id")
-    suspend fun capCartQuantity(id: Long, stock: Int)
     @Query("DELETE FROM CartItem") suspend fun clearCart()
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
@@ -125,6 +154,7 @@ interface PosDao {
     @Transaction @Query("SELECT * FROM Sale WHERE id = :id") suspend fun receipt(id: Long): Receipt?
     @Insert suspend fun addSale(sale: Sale): Long
     @Insert suspend fun addLines(lines: List<SaleLine>)
+    @Insert suspend fun addCharges(charges: List<SaleCharge>)
     @Transaction
     @Query("SELECT * FROM Sale WHERE time >= :start AND time < :endExclusive ORDER BY time, id")
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
@@ -132,8 +162,8 @@ interface PosDao {
 
 @Database(
     entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class, CashierProfile::class,
-        StockCount::class, StockCountLine::class],
-    version = 6
+        StockCount::class, StockCountLine::class, SaleCharge::class],
+    version = 7
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
@@ -156,6 +186,26 @@ abstract class PosDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `StockCount` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `time` INTEGER NOT NULL)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS `StockCountLine` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `countId` INTEGER NOT NULL, `ingredientId` INTEGER, `ingredientName` TEXT NOT NULL, `unit` TEXT NOT NULL, `systemStock` INTEGER NOT NULL, `countedStock` INTEGER NOT NULL, FOREIGN KEY(`countId`) REFERENCES `StockCount`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_StockCountLine_countId` ON `StockCountLine` (`countId`)")
+            }
+        }
+
+        private val addVariantsDiscountsCharges = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE Product ADD COLUMN options TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE Product ADD COLUMN promoPercent INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE Product ADD COLUMN promoAmount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE Sale ADD COLUMN subtotal INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE Sale SET subtotal = total")
+                db.execSQL("ALTER TABLE SaleLine ADD COLUMN options TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE SaleLine ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE SaleLine ADD COLUMN discount INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `SaleCharge` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `saleId` INTEGER NOT NULL, `name` TEXT NOT NULL, `amount` INTEGER NOT NULL, FOREIGN KEY(`saleId`) REFERENCES `Sale`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_SaleCharge_saleId` ON `SaleCharge` (`saleId`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `CartItem_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `productId` INTEGER NOT NULL, `quantity` INTEGER NOT NULL, `options` TEXT NOT NULL, `note` TEXT NOT NULL, FOREIGN KEY(`productId`) REFERENCES `Product`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+                db.execSQL("INSERT INTO CartItem_new (productId, quantity, options, note) SELECT productId, quantity, '', '' FROM CartItem")
+                db.execSQL("DROP TABLE CartItem")
+                db.execSQL("ALTER TABLE CartItem_new RENAME TO CartItem")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_CartItem_productId_options_note` ON `CartItem` (`productId`, `options`, `note`)")
             }
         }
 
@@ -184,7 +234,7 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles, addStockCounts)
+            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles, addStockCounts, addVariantsDiscountsCharges)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     addOwnerCashier(db)
@@ -221,59 +271,86 @@ enum class Payment(val label: String) { CASH("Tunai"), QRIS("QRIS") }
 
 class SaleInputException(message: String) : IllegalArgumentException(message)
 
-data class Checkout(val lines: List<SaleLine>, val total: Long, val paid: Long)
+data class Checkout(
+    val lines: List<SaleLine>,
+    val total: Long,
+    val paid: Long,
+    val subtotal: Long = total,
+    val charges: List<SaleCharge> = emptyList()
+)
 
 internal fun cartItemCount(cart: Map<Long, Int>): Long = cart.values.sumOf { it.toLong() }
 
-fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Payment, cash: Long?): Checkout {
+internal fun cartItemCount(cart: List<CartItem>): Long = cart.sumOf { it.quantity.toLong() }
+
+internal fun cartQuantities(cart: List<CartItem>): Map<Long, Int> =
+    cart.groupingBy { it.productId }.fold(0) { sum, item -> (sum.toLong() + item.quantity).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
+
+fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Payment, cash: Long?): Checkout =
+    calculateCheckout(products, cart.map { (id, qty) -> CartItem(productId = id, quantity = qty) }, payment, cash)
+
+fun calculateCheckout(
+    products: List<Product>, cart: List<CartItem>, payment: Payment, cash: Long?,
+    charges: List<ExtraCharge> = emptyList()
+): Checkout {
     if (cart.isEmpty()) throw SaleInputException("Keranjang masih kosong.")
     val byId = products.associateBy { it.id }
-    val lines = cart.map { (id, qty) ->
+    for ((id, qty) in cartQuantities(cart)) {
         val item = byId[id] ?: throw SaleInputException("Ada produk yang sudah dihapus. Perbarui keranjang.")
         if (qty <= 0 || qty > item.stock) throw SaleInputException("Stok ${item.name} tidak mencukupi.")
-        SaleLine(saleId = 0, productName = item.name, unitPrice = item.price, quantity = qty, productId = item.id)
     }
-    val total = lines.sumOf { it.unitPrice * it.quantity }
-    val paid = if (payment == Payment.QRIS) total else cash ?: 0
-    if (paid < total) throw SaleInputException("Uang tunai kurang dari total belanja.")
-    return Checkout(lines, total, paid)
+    val lines = cart.map { line ->
+        val item = byId.getValue(line.productId)
+        if (line.quantity <= 0) throw SaleInputException("Stok ${item.name} tidak mencukupi.")
+        val unitPrice = cartLineUnitPrice(item, line)
+            ?: throw SaleInputException("Pilihan ${item.name} sudah berubah. Perbarui keranjang.")
+        SaleLine(saleId = 0, productName = item.name, unitPrice = unitPrice, quantity = line.quantity, productId = item.id,
+            options = selectedOptionNames(line.options).joinToString(", "), note = line.note.trim(), discount = item.promoPerUnit)
+    }
+    val totals = orderTotals(lines.sumOf { it.unitPrice * it.quantity }, charges)
+    val paid = if (payment == Payment.QRIS) totals.total else cash ?: 0
+    if (paid < totals.total) throw SaleInputException("Uang tunai kurang dari total belanja.")
+    return Checkout(lines, totals.total, paid, totals.subtotal, totals.charges)
 }
 
 class Register(private val db: PosDatabase) {
     private val dao = db.dao()
 
     suspend fun sell(
-        cart: Map<Long, Int>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile, cashierId: Long
-    ): Receipt =
-        db.withTransaction {
-            if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
-                throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
-            }
-            val menu = dao.menuById(cart.keys)
-            val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash)
-            if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
-            val ingredients = checkedIngredientDemand(menu, cart)
-            val cashier = dao.cashier(cashierId) ?: dao.cashier(OWNER_CASHIER_ID)
-                ?: throw SaleInputException("Profil kasir tidak ditemukan.")
-            val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
-                method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName,
-                cashierName = cashier.name)
-            val id = dao.addSale(sale)
-            for (item in menu.filter { it.recipe.isEmpty() }) {
-                if (dao.decrement(item.product.id, cart.getValue(item.product.id)) != 1) {
-                    throw SaleInputException("Stok berubah. Periksa keranjang.")
-                }
-            }
-            for ((ingredientId, quantity) in ingredients) {
-                if (dao.decrementIngredient(ingredientId, quantity) != 1) {
-                    throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
-                }
-            }
-            val lines = order.lines.map { it.copy(saleId = id) }
-            dao.addLines(lines)
-            dao.clearCart()
-            Receipt(sale.copy(id = id), lines)
+        cart: List<CartItem>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile, cashierId: Long,
+        charges: List<ExtraCharge> = emptyList()
+    ): Receipt = db.withTransaction {
+        if (dao.cartSnapshot().sortedBy { it.id } != cart.sortedBy { it.id }) {
+            throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
         }
+        val quantities = cartQuantities(cart)
+        val menu = dao.menuById(quantities.keys)
+        val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash, charges)
+        if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
+        val ingredients = checkedIngredientDemand(menu, quantities)
+        val cashier = dao.cashier(cashierId) ?: dao.cashier(OWNER_CASHIER_ID)
+            ?: throw SaleInputException("Profil kasir tidak ditemukan.")
+        val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
+            method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName,
+            cashierName = cashier.name, subtotal = order.subtotal)
+        val id = dao.addSale(sale)
+        for (item in menu.filter { it.recipe.isEmpty() }) {
+            if (dao.decrement(item.product.id, quantities.getValue(item.product.id)) != 1) {
+                throw SaleInputException("Stok berubah. Periksa keranjang.")
+            }
+        }
+        for ((ingredientId, quantity) in ingredients) {
+            if (dao.decrementIngredient(ingredientId, quantity) != 1) {
+                throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
+            }
+        }
+        val lines = order.lines.map { it.copy(saleId = id) }
+        dao.addLines(lines)
+        val charges = order.charges.map { it.copy(saleId = id) }
+        if (charges.isNotEmpty()) dao.addCharges(charges)
+        dao.clearCart()
+        Receipt(sale.copy(id = id), lines, charges)
+    }
 }
 
 val indonesia = Locale("id", "ID")
@@ -287,11 +364,16 @@ fun Receipt.asText() = buildString {
     sale.cashierLabel?.let { appendLine(it) }
     appendLine()
     lines.forEach {
-        appendLine("${it.quantity} × ${it.productName} — ${rupiah(it.unitPrice * it.quantity)}")
+        appendLine("${it.quantity} × ${it.productName} — ${rupiah((it.unitPrice + it.discount) * it.quantity)}")
+        it.detailLines().forEach { detail -> appendLine("  $detail") }
     }
     appendLine()
+    if (hasAdjustments) appendLine("Subtotal: ${rupiah(sale.subtotal)}")
+    charges.forEach { appendLine("${it.name}: ${rupiah(it.amount)}") }
     appendLine("Total: ${rupiah(sale.total)}")
     appendLine("${sale.method}: ${rupiah(sale.paid)}")
     if (sale.method == Payment.CASH.label) appendLine("Kembalian: ${rupiah(sale.paid - sale.total)}")
     append("Terima kasih sudah berbelanja!")
 }
+
+internal val Receipt.hasAdjustments get() = charges.isNotEmpty()

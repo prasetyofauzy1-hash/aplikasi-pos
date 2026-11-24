@@ -17,7 +17,6 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,8 +39,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     internal val cashiers = dao.cashiers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val stockCounts = dao.stockCounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+    val cart = dao.cart().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     internal fun dailyReceipts(period: ReportPeriod) = dao.dailyReceipts(period.start, period.end)
 
@@ -67,6 +65,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     var qrisImageName by mutableStateOf(preferences.getString("qrisImage", null).orEmpty())
         private set
     var receipt by mutableStateOf<Receipt?>(null)
+        private set
+    var extraCharges by mutableStateOf(chargesFromJson(preferences.getString("extraCharges", null)))
         private set
     internal var printer by mutableStateOf(preferences.getString("printerAddress", null)?.let { address ->
         PairedPrinter(address, preferences.getString("printerName", null) ?: "Perangkat Bluetooth")
@@ -296,29 +296,49 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun adjust(product: Product, delta: Int) =
-        changeCartQuantity(product) { (it.toLong() + delta).coerceAtLeast(0L) }
+    fun addToCart(product: Product, options: List<String> = emptyList(), note: String = "", quantity: Int = 1) {
+        val optionText = formatSelectedOptions(options)
+        val cleanNote = cleanOptionText(note, 80).trim()
+        changeCart(product) { lines ->
+            val line = lines.firstOrNull { it.productId == product.id && it.options == optionText && it.note == cleanNote }
+            (line ?: CartItem(productId = product.id, quantity = 0, options = optionText, note = cleanNote)) to
+                (line?.quantity ?: 0).toLong() + quantity
+        }
+    }
 
-    fun setQuantity(product: Product, quantity: Int) = changeCartQuantity(product) { quantity.toLong() }
+    fun adjustLine(item: CartItem, delta: Int) = changeCart(null, item.productId) { lines ->
+        val line = lines.firstOrNull { it.id == item.id }
+        line to (line?.quantity ?: 0).toLong() + delta
+    }
 
-    private fun changeCartQuantity(product: Product, quantity: (Int) -> Long) {
+    fun setLineQuantity(item: CartItem, quantity: Int) = changeCart(null, item.productId) { lines ->
+        lines.firstOrNull { it.id == item.id } to quantity.toLong()
+    }
+
+    private fun changeCart(product: Product?, productId: Long = product?.id ?: 0, target: (List<CartItem>) -> Pair<CartItem?, Long>) {
         if (busy) return
         viewModelScope.launch {
             try {
                 database.withTransaction {
-                    val previous = dao.cartSnapshot().associate { it.productId to it.quantity }
-                    val old = previous[product.id]
-                    val next = quantity(old ?: 0)
-                    if (next !in 0L..Int.MAX_VALUE.toLong()) return@withTransaction
-                    val available = if (next > (old ?: 0)) {
-                        val items = dao.menuById(previous.keys + product.id)
-                        items.firstOrNull { it.product.id == product.id }
-                            ?.availableStock(ingredientDemand(items, previous), old ?: 0) ?: 0
-                    } else product.stock
-                    val updated = updateCartQuantity(previous, product.copy(stock = available), next.toInt())[product.id]
-                    if (updated == old) return@withTransaction
-                    if (updated == null) dao.removeCartItem(product.id)
-                    else dao.putCartItem(CartItem(product.id, updated))
+                    val lines = dao.cartSnapshot()
+                    val (line, requested) = target(lines)
+                    if (line == null) return@withTransaction
+                    val next = requested.coerceAtLeast(0L)
+                    if (next > Int.MAX_VALUE) return@withTransaction
+                    val previous = cartQuantities(lines)
+                    val oldTotal = previous[productId] ?: 0
+                    val newTotal = oldTotal.toLong() - line.quantity + next
+                    if (next > line.quantity) {
+                        val items = dao.menuById(previous.keys + productId)
+                        val available = items.firstOrNull { it.product.id == productId }
+                            ?.availableStock(ingredientDemand(items, previous), oldTotal) ?: 0
+                        if (newTotal > available) return@withTransaction
+                    }
+                    when {
+                        next == 0L -> if (line.id != 0L) dao.removeCartLine(line.id)
+                        line.id == 0L -> dao.addCartItem(line.copy(quantity = next.toInt()))
+                        else -> dao.setCartQuantity(line.id, next.toInt())
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -326,6 +346,14 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 error = "Keranjang tidak dapat diperbarui."
             }
         }
+    }
+
+    fun saveExtraCharges(charges: List<ExtraCharge>, onDone: () -> Unit = {}) = runAction("Biaya tambahan tidak dapat disimpan.") {
+        withContext(Dispatchers.IO) {
+            if (!preferences.edit().putString("extraCharges", chargesToJson(charges)).commit()) throw IOException()
+        }
+        extraCharges = charges
+        onDone()
     }
 
     fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
@@ -345,8 +373,12 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             if (recipe.isNotEmpty()) {
                 dao.addRecipe(recipe.map { (ingredientId, quantity) -> RecipeLine(id, ingredientId, quantity) })
             } else {
-                if (product.stock == 0) dao.removeCartItem(product.id)
-                else dao.capCartQuantity(product.id, product.stock)
+                var remaining = product.stock
+                for (line in dao.cartSnapshot().filter { it.productId == product.id }.sortedBy { it.id }) {
+                    val kept = minOf(line.quantity, remaining)
+                    remaining -= kept
+                    if (kept == 0) dao.removeCartLine(line.id) else if (kept != line.quantity) dao.setCartQuantity(line.id, kept)
+                }
             }
         }
         onDone()
@@ -393,9 +425,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         onDone()
     }
 
-    fun sell(cart: Map<Long, Int>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
+    fun sell(cart: List<CartItem>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
         runAction("Transaksi tidak dapat disimpan.") {
-            receipt = register.sell(cart, total, payment, cash, profile, activeCashierId)
+            receipt = register.sell(cart, total, payment, cash, profile, activeCashierId, extraCharges)
             onDone()
         }
 

@@ -100,7 +100,10 @@ internal fun salesCsv(period: SalesExportPeriod, receipts: List<Receipt>): Strin
     for (receipt in receipts) {
         val sale = receipt.sale
         row(dateTime.format(Date(sale.time)), ticket(sale.id),
-            receipt.lines.sortedBy { it.id }.joinToString(", ") { "${it.quantity} × ${it.productName}" },
+            receipt.lines.sortedBy { it.id }.joinToString(", ") { line ->
+                "${line.quantity} × ${line.productName}" + listOf(line.options, line.note).filter { it.isNotBlank() }
+                    .joinToString("; ").let { if (it.isEmpty()) "" else " ($it)" }
+            },
             sale.method, sale.total.toString())
     }
 }

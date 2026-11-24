@@ -40,9 +40,12 @@ internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper): ByteArray = 
     divider()
     receipt.lines.forEach { item ->
         line(item.productName)
-        row("${item.quantity} x ${rupiah(item.unitPrice)}", rupiah(item.quantity * item.unitPrice))
+        row("${item.quantity} x ${rupiah(item.unitPrice + item.discount)}", rupiah(item.quantity * (item.unitPrice + item.discount)))
+        item.detailLines().forEach { line(it) }
     }
     divider()
+    if (receipt.hasAdjustments) row("Subtotal", rupiah(sale.subtotal))
+    receipt.charges.forEach { row(it.name, rupiah(it.amount)) }
     row("Total", rupiah(sale.total))
     line("Pembayaran: ${sale.method}")
     if (sale.method == Payment.CASH.label) {
@@ -85,7 +88,9 @@ private class ThermalDocument(private val width: Int) {
         if (remaining.isNotEmpty()) output.appendLine(remaining)
     }
 
-    fun row(label: String, amount: String) {
+    fun row(rawLabel: String, rawAmount: String) {
+        val label = rawLabel.printerText()
+        val amount = rawAmount.printerText()
         val space = width - label.length - amount.length
         if (space > 0) {
             output.appendLine(label + " ".repeat(space) + amount)
