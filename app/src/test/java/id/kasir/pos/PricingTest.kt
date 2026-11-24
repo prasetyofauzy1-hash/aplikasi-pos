@@ -57,6 +57,8 @@ class PricingTest {
         assertNull(parseOptionDraft("Less sugar\nless sugar"))
         assertEquals(listOf(ProductOption("Cup besar", 5_000)), parseOptionDraft("Cup besar +Rp5.000,00"))
         assertNull(parseOptionDraft("Cup besar +5.00"))
+        assertEquals(listOf(ProductOption("Cup besar", 5_000)), parseOptionDraft("Cup besar +Rp. 5.000"))
+        assertEquals(listOf(ProductOption("Cookies + Cream", 0)), parseOptionDraft("Cookies + Cream"))
         val free = listOf(ProductOption("Topping +2", 0))
         assertEquals(free, parseOptionDraft(formatOptionDraft(free)))
         assertEquals("Cup besar +5000\nLess sugar", formatOptionDraft(parseOptionDraft("Cup besar +5000\nLess sugar")!!))
