@@ -109,16 +109,18 @@ internal fun ProfitScreen(menu: List<MenuItem>, ingredients: List<Ingredient>, m
             }
             when (page) {
                 ProfitPage.MENU -> {
-                    item { Text("Estimasi per porsi berdasarkan harga jual dan biaya bahan saat ini.", color = Muted) }
+                    item { Text("Estimasi per porsi memakai promo saat ini, tanpa varian dan biaya tambahan pesanan.", color = Muted) }
                     if (menu.isEmpty()) item { EmptyPanel("Belum ada menu", "Tambahkan menu di tab Produk.") }
                     items(menu, key = { it.product.id }) { item ->
                         val product = item.product
                         val hpp = menuCosts[product.id]
+                        val promo = product.promoPerUnit
+                        val unitPrice = product.price - promo
                         ProfitCard {
                             Text(product.name, fontWeight = FontWeight.Bold)
-                            MetricRow("Harga jual", rupiah(product.price))
+                            MetricRow(if (promo > 0) "Harga setelah promo" else "Harga jual", rupiah(unitPrice))
                             MetricRow("HPP per porsi", hpp?.let(::rupiah) ?: "Belum tersedia")
-                            MetricRow("Estimasi laba per porsi", hpp?.let { rupiah(product.price - it) } ?: "—", strong = true)
+                            MetricRow("Estimasi laba per porsi", hpp?.let { rupiah(unitPrice - it) } ?: "—", strong = true)
                             if (item.recipe.isEmpty()) {
                                 TextButton(onClick = {
                                     model.clearError()
@@ -142,7 +144,7 @@ internal fun ProfitScreen(menu: List<MenuItem>, ingredients: List<Ingredient>, m
                                 ProfitCard {
                                     Text("Ringkasan harian", fontWeight = FontWeight.Bold)
                                     SalesProfitMetrics(report.totals)
-                                    Text("HPP memakai biaya pada saat transaksi. Penjualan tanpa HPP tidak masuk hitungan laba.",
+                                    Text("HPP memakai biaya saat transaksi. Penjualan tanpa HPP dan biaya tambahan pesanan tidak masuk hitungan laba.",
                                         color = Muted)
                                 }
                             }

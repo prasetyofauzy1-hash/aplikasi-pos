@@ -50,12 +50,18 @@ class BackupArchiveTest {
             }
             PosDatabase.withBackupDatabase(context, name) { upgraded ->
                 assertEquals("Maya", upgraded.dao().cashier(1)?.name)
-                assertEquals(4, upgraded.dao().menuById(setOf(12)).single().product.stock)
-                assertEquals(200, upgraded.dao().ingredientsById(setOf(3)).single().stock)
+                val product = upgraded.dao().menuById(setOf(12)).single().product
+                assertEquals(4, product.stock)
+                assertNull(product.directHpp)
+                val ingredient = upgraded.dao().ingredientsById(setOf(3)).single()
+                assertEquals(200, ingredient.stock)
+                assertNull(ingredient.purchaseCost)
+                assertNull(ingredient.purchaseQuantity)
                 assertEquals(200, upgraded.dao().stockCounts().first().single().lines.single().countedStock)
                 val receipt = requireNotNull(upgraded.dao().receipt(41))
                 assertEquals(20000L, receipt.sale.total)
                 assertEquals(12L, receipt.lines.single().productId)
+                assertNull(receipt.lines.single().unitHpp)
                 assertNull(upgraded.dao().storeSettingsSnapshot())
             }
         } finally {
@@ -82,7 +88,9 @@ class BackupArchiveTest {
                 val cashier = CashierProfile(id = OWNER_CASHIER_ID, name = "Maya")
                 dao.addCashier(cashier)
                 val product = dao.add(Product(name = "Jus Berry", category = "Jus", price = 15000, stock = 4))
-                val ingredient = Ingredient(id = 3, name = "Berry", unit = "g", stock = 200)
+                val direct = dao.add(Product(name = "Air", category = "Minum", price = 5000, stock = 4, directHpp = 2000))
+                val ingredient = Ingredient(id = 3, name = "Berry", unit = "g", stock = 200,
+                    purchaseCost = 25000, purchaseQuantity = 1000)
                 dao.addIngredient(ingredient)
                 val countId = dao.addStockCount(StockCount(time = 1234))
                 val countLine = StockCountLine(1, countId, ingredient.id, ingredient.name, ingredient.unit, 250, 200)
@@ -95,7 +103,7 @@ class BackupArchiveTest {
                     productDeductions = encodeStockDeductions(emptyMap()))
                 dao.addSale(sale)
                 dao.addLines(listOf(SaleLine(saleId = sale.id, productName = "Jus Berry",
-                    unitPrice = 15000, quantity = 1, productId = product, options = "Besar", note = "Less sugar")))
+                    unitPrice = 15000, quantity = 1, productId = product, options = "Besar", note = "Less sugar", unitHpp = 2500)))
                 val charge = SaleCharge(1, sale.id, "Layanan", 1000)
                 dao.addCharges(listOf(charge))
                 BackupArchive(context, source).create(archiveFile, profile)
@@ -130,12 +138,14 @@ class BackupArchiveTest {
                     val menu = target.dao().menuById(setOf(product)).single()
                     assertEquals("Jus Berry", menu.product.name)
                     assertEquals(ingredient, menu.recipe.single().ingredient)
+                    assertEquals(2000L, target.dao().menuById(setOf(direct)).single().product.directHpp)
                     assertEquals(countLine, target.dao().stockCounts().first().single().lines.single())
                     assertEquals(cashier, target.dao().cashier(cashier.id))
                     val receipt = requireNotNull(target.dao().receipt(sale.id))
                     assertEquals(sale, receipt.sale)
                     assertEquals(product, receipt.lines.single().productId)
                     assertEquals("Less sugar", receipt.lines.single().note)
+                    assertEquals(2500L, receipt.lines.single().unitHpp)
                     assertEquals(charge, receipt.charges.single())
                     assertTrue(target.dao().cartSnapshot().isEmpty())
                 }

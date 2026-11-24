@@ -59,6 +59,19 @@ class ProfitTest {
         assertEquals((-8_000).toBigInteger(), report.totals.grossProfit)
     }
 
+    @Test fun `profit includes line variant and promo but omits order charges`() {
+        val promoted = product.copy(stock = 2, options = formatProductOptions(listOf(ProductOption("Cup besar", 5_000))),
+            promoAmount = 2_000)
+        val cart = listOf(CartItem(productId = product.id, quantity = 2, options = "Cup besar"))
+        val order = calculateCheckout(listOf(promoted), cart, Payment.QRIS, null, listOf(ExtraCharge("Layanan", amount = 1_000)))
+        val sale = Sale(1, 1, order.total, order.paid, "QRIS", "", "", "", subtotal = order.subtotal)
+        val report = profitReport(listOf(Receipt(sale, order.lines.map { it.copy(unitHpp = 7_400) }, order.charges)))
+
+        assertEquals(47_000L, order.total)
+        assertEquals(46_000.toBigInteger(), report.totals.revenue)
+        assertEquals(31_200.toBigInteger(), report.totals.grossProfit)
+    }
+
     private fun component(id: Long, recipeAmount: Int, cost: Long?, purchaseAmount: Int?) =
         RecipeComponent(RecipeLine(product.id, id, recipeAmount),
             Ingredient(id, "Bahan $id", "g", 0, cost, purchaseAmount))
