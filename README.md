@@ -8,6 +8,7 @@ Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat, t
 - Masukkan jumlah bahan di **Produk → Stok bahan**. Gunakan gram, mililiter, atau buah sesuai bahan. Menu dan resep contoh tersedia pada pemasangan pertama, tetapi stok awal bahan adalah nol.
 - Gunakan **Produk** untuk menambah, mengubah, atau menghapus menu, harga, kategori, dan resep per porsi. Misalnya, satu Berry Go memakai 200 g berry dan 200 g pisang.
 - Pilih menu di **Kasir**, periksa keranjang, lalu catat pembayaran **Tunai** atau **QRIS**. QRIS hanya dicatat setelah Anda memeriksa pembayaran di luar aplikasi. Menu hanya bisa dijual jika bahannya cukup, termasuk ketika beberapa menu memakai bahan yang sama. Stok bahan berkurang setelah transaksi berhasil disimpan.
+- Di tab **Toko**, gunakan **Pilih gambar QRIS** untuk menyimpan gambar QRIS statis dari galeri. Gambar dapat diganti atau dihapus kapan saja. Saat memilih **QRIS** di pembayaran, tampilkan kode di layar untuk dipindai pelanggan. Pelanggan memasukkan nominal yang tertera; tekan **Konfirmasi & simpan QRIS** hanya setelah dana masuk.
 - Buka **Riwayat** dan pilih tanggal untuk melihat total penjualan, rincian Tunai dan QRIS, serta struk hari itu. Pilih **Produk terjual** untuk mencocokkan jumlah dan omzet per produk dengan catatan manual. **Bagikan struk** membuka menu berbagi Android; pilih WhatsApp jika terpasang. Struk yang dibagikan berupa teks.
 
 ## Pengembangan

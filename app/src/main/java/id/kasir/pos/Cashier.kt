@@ -314,7 +314,8 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
                 cash != null -> MetricRow("Kembalian", rupiah(cash - total), true)
             }
         } else {
-            EmptyPanel("QRIS dicatat manual", "Pastikan dana sudah diterima sebelum menyimpan. Aplikasi tidak memproses pembayaran QRIS.")
+            StaticQrisPayment(model.qrisImageName)
+            EmptyPanel("QRIS dicatat manual", "Minta pelanggan memasukkan total yang tertera. Pastikan dana sudah diterima sebelum menyimpan.")
         }
         ErrorText(model.error)
         Button(
