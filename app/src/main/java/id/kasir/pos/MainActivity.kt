@@ -151,7 +151,7 @@ private fun RegisterApp(model: RegisterModel) {
                 closeSubScreen = closeSubScreen
             ) {
                 when {
-                    receipt != null -> ReceiptScreen(receipt, fromCheckout = tab == Tab.REGISTER, onDone = closeSubScreen)
+                    receipt != null -> ReceiptScreen(receipt, model, fromCheckout = tab == Tab.REGISTER, onDone = closeSubScreen)
                     selectedId != null -> {
                         val item = if (selectedId == 0L) MenuItem(Product(name = "", category = "", price = 0, stock = 0), emptyList())
                             else menu.firstOrNull { it.product.id == selectedId }

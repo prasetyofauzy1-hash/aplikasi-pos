@@ -66,6 +66,16 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var receipt by mutableStateOf<Receipt?>(null)
         private set
+    internal var printer by mutableStateOf(preferences.getString("printerAddress", null)?.let { address ->
+        PairedPrinter(address, preferences.getString("printerName", null) ?: "Perangkat Bluetooth")
+    })
+        private set
+    internal var thermalPaper by mutableStateOf(
+        ThermalPaper.entries.firstOrNull { it.name == preferences.getString("printerPaper", null) } ?: ThermalPaper.MM58
+    )
+        private set
+    internal var printing by mutableStateOf(false)
+        private set
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
@@ -348,6 +358,50 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeReceipt() { receipt = null }
+
+    internal fun selectPrinter(device: PairedPrinter) {
+        preferences.edit().putString("printerAddress", device.address).putString("printerName", device.name).apply()
+        printer = device
+    }
+
+    internal fun setThermalPaper(paper: ThermalPaper) {
+        preferences.edit().putString("printerPaper", paper.name).apply()
+        thermalPaper = paper
+    }
+
+    internal fun testPrinter(onResult: (String?) -> Unit) {
+        val currentProfile = profile
+        print(onResult) { paper -> thermalPrinterTest(currentProfile, paper) }
+    }
+
+    internal fun printReceipt(receipt: Receipt, onResult: (String?) -> Unit) =
+        print(onResult) { paper -> thermalReceipt(receipt, paper) }
+
+    private fun print(onResult: (String?) -> Unit, document: (ThermalPaper) -> ByteArray) {
+        if (printing) return
+        val device = printer
+        if (device == null) {
+            onResult("Pilih printer terlebih dahulu di Toko → Printer.")
+            return
+        }
+        val paper = thermalPaper
+        printing = true
+        viewModelScope.launch {
+            val error = try {
+                sendToPrinter(getApplication(), device) { document(paper) }
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: PrinterException) {
+                e.message ?: "Data cetak tidak dapat dikirim. Coba lagi."
+            } catch (_: Exception) {
+                "Data cetak tidak dapat dikirim. Coba lagi."
+            } finally {
+                printing = false
+            }
+            onResult(error)
+        }
+    }
 
     internal fun exportSales(period: SalesExportPeriod, onReady: (Uri) -> Unit) =
         runAction("CSV penjualan tidak dapat dibagikan. Coba lagi.") {
