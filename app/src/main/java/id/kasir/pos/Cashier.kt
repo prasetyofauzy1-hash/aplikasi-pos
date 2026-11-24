@@ -52,6 +52,8 @@ internal fun CashierScreen(
     onQueryChange: (String) -> Unit,
     compact: Boolean,
     searching: Boolean,
+    shiftLoaded: Boolean,
+    shift: ShiftSummary?,
     onCart: () -> Unit
 ) {
     val focusManager = LocalFocusManager.current
@@ -78,6 +80,7 @@ internal fun CashierScreen(
                         }
                     }
                     CashierProfilePicker(model)
+                    ShiftPanel(model, shiftLoaded, shift)
                     OutlinedTextField(query, onQueryChange, Modifier.fillMaxWidth(), singleLine = true,
                         placeholder = { Text(if (compact) "Cari produk" else "Cari nama atau kategori", maxLines = 1) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
@@ -226,7 +229,9 @@ internal fun cartIssue(products: List<Product>, cart: List<CartItem>) =
     cartStockIssue(products, cartQuantities(cart)) ?: cartOptionIssue(products, cart)
 
 @Composable
-internal fun CartScreen(products: List<Product>, cart: List<CartItem>, model: RegisterModel, short: Boolean, onPay: () -> Unit) {
+internal fun CartScreen(
+    products: List<Product>, cart: List<CartItem>, model: RegisterModel, short: Boolean, shiftOpen: Boolean, onPay: () -> Unit
+) {
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val byId = products.associateBy { it.id }
     val listed = cart.filter { it.productId in byId }
@@ -280,7 +285,10 @@ internal fun CartScreen(products: List<Product>, cart: List<CartItem>, model: Re
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (!short) TotalBanner("Total pesanan", total)
-            Button(onClick = onPay, enabled = listed.isNotEmpty() && stockIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
+            if (!shiftOpen && listed.isNotEmpty()) {
+                Text("Buka shift di tab Kasir sebelum membayar.", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            Button(onClick = onPay, enabled = shiftOpen && listed.isNotEmpty() && stockIssue == null, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)) {
                 Text("Lanjut ke pembayaran")
             }
         }

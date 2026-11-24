@@ -45,6 +45,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     internal val cashiers = dao.cashiers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val stockCounts = dao.stockCounts().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val cart = dao.cart().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    internal val latestShift = database.shiftDao().observeLatest(Payment.CASH.label)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     internal fun dailyReceipts(period: ReportPeriod) = dao.dailyReceipts(period.start, period.end)
 
@@ -521,6 +523,17 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         dao.delete(product.id)
         onDone()
     }
+
+    internal fun openShift(openingCash: Long, onDone: () -> Unit) = runAction("Shift tidak dapat dibuka.") {
+        register.openShift(openingCash)
+        onDone()
+    }
+
+    internal fun closeShift(preview: ShiftSummary, closingCash: Long, onDone: () -> Unit) =
+        runAction("Shift tidak dapat ditutup.") {
+            register.closeShift(preview, closingCash)
+            onDone()
+        }
 
     fun sell(cart: List<CartItem>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
         runAction("Transaksi tidak dapat disimpan.") {
