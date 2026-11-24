@@ -86,6 +86,9 @@ interface PosDao {
     @Transaction @Query("SELECT * FROM Sale WHERE id = :id") suspend fun receipt(id: Long): Receipt?
     @Insert suspend fun addSale(sale: Sale): Long
     @Insert suspend fun addLines(lines: List<SaleLine>)
+    @Transaction
+    @Query("SELECT * FROM Sale WHERE time >= :start AND time < :endExclusive ORDER BY time, id")
+    suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
 @Database(entities = [Product::class, Sale::class, SaleLine::class, CartItem::class], version = 2)

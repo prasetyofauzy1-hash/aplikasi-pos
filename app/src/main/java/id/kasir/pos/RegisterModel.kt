@@ -191,6 +191,13 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun closeReceipt() { receipt = null }
 
+    internal fun exportSales(period: SalesExportPeriod, onReady: (Uri) -> Unit) =
+        runAction("CSV penjualan tidak dapat dibagikan. Coba lagi.") {
+            val receipts = dao.receiptsForExport(period.start, period.endExclusive)
+            val uri = withContext(Dispatchers.IO) { writeSalesCsv(getApplication(), period, receipts) }
+            onReady(uri)
+        }
+
     fun saveProfile(name: String, address: String, newLogo: Uri?, removeLogo: Boolean, onDone: () -> Unit) =
         runAction("Pengaturan tidak dapat disimpan. Periksa kembali file logo.") {
             profile = withContext(Dispatchers.IO) {
