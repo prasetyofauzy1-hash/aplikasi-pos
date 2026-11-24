@@ -106,7 +106,7 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
     val products = remember(menu, cart) { availableCatalog(menu, cartQuantities(cart)) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     DisposableEffect(tab, window) {
-        val protectWindow = tab == Tab.PROFIT && Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        val protectWindow = tab == Tab.PROFIT
         if (protectWindow) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { if (protectWindow) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
