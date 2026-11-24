@@ -87,6 +87,16 @@ class InventoryTest {
         assertEquals(mapOf(berryGo.product.id to 0, bottledWater.product.id to 5), stock)
     }
 
+    @Test fun deletionLeavesCountedIngredientsUnchangedAndRestoresTheRest() = runBlocking {
+        val stock = mutableMapOf(berries.id to 350, banana.id to 200)
+        val snapshot = encodeStockDeductions(mapOf(berries.id to 200, banana.id to 200))
+        restoreStockDeductions(snapshot, "bahan", stock::containsKey, skipIds = setOf(berries.id)) { id, quantity ->
+            stock[id] = stock.getValue(id) + quantity
+            1
+        }
+        assertEquals(mapOf(berries.id to 350, banana.id to 400), stock)
+    }
+
     @Test fun rejectsAnOrderThatIndividuallyFitsButTogetherRunsOut() {
         val failure = assertThrows(SaleInputException::class.java) {
             checkedIngredientDemand(listOf(berryGo, smoothie), mapOf(1L to 2, 2L to 1))

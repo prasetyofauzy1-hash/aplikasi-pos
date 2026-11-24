@@ -319,7 +319,7 @@ internal fun HistoryScreen(model: RegisterModel) {
     val (today, zone) = rememberReportClock().value
     var selectedDate by rememberSaveable { mutableStateOf<Long?>(null) }
     var showProducts by rememberSaveable { mutableStateOf(false) }
-    var saleToDelete by remember { mutableStateOf<Sale?>(null) }
+    var saleToDelete by remember { mutableStateOf<SaleDeletion?>(null) }
     val listState = rememberLazyListState()
     val date = selectedDate ?: today
     val period = remember(date, zone) { reportPeriod(date, zone) }
@@ -402,10 +402,7 @@ internal fun HistoryScreen(model: RegisterModel) {
                         Text("›", color = Pine)
                     }
                     TextButton(
-                        onClick = {
-                            model.clearError()
-                            saleToDelete = sale
-                        },
+                        onClick = { model.previewSaleDeletion(sale) { saleToDelete = it } },
                         enabled = !model.busy,
                         modifier = Modifier.align(Alignment.End).padding(horizontal = 14.dp)
                     ) { Text("Hapus transaksi", color = MaterialTheme.colorScheme.error) }
@@ -413,8 +410,8 @@ internal fun HistoryScreen(model: RegisterModel) {
             }
         }
     }
-    saleToDelete?.let { sale ->
-        DeleteSaleDialog(sale, model) {
+    saleToDelete?.let { deletion ->
+        DeleteSaleDialog(deletion, model) {
             model.clearError()
             saleToDelete = null
         }
@@ -422,19 +419,24 @@ internal fun HistoryScreen(model: RegisterModel) {
 }
 
 @Composable
-private fun DeleteSaleDialog(sale: Sale, model: RegisterModel, onDismiss: () -> Unit) {
+private fun DeleteSaleDialog(deletion: SaleDeletion, model: RegisterModel, onDismiss: () -> Unit) {
+    val sale = deletion.sale
     var pin by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (!model.busy) onDismiss() },
         title = { Text("Hapus transaksi?") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("${ticket(sale.id)} senilai ${rupiah(sale.total)} akan dihapus dari riwayat dan laporan penjualan.")
                 Text(if (sale.ingredientDeductions == null && sale.productDeductions == null) {
                     "Catatan stok tidak tersedia untuk transaksi lama ini. Sesuaikan stok secara manual jika diperlukan."
                 } else {
                     "Stok akan dikembalikan untuk bahan dan produk yang masih tersedia. Penghapusan tidak dapat dibatalkan."
                 })
+                if (deletion.countedIngredients.isNotEmpty()) {
+                    val names = deletion.countedIngredients.joinToString(", ") { it.name }
+                    Text("Stok bahan berikut tidak dikembalikan karena sudah dihitung lewat stok opname setelah transaksi: $names.")
+                }
                 Text("Masukkan PIN pemilik untuk mengonfirmasi.")
                 PinInput(pin, "PIN pemilik", !model.busy, model.error != null, ImeAction.Done, KeyboardActions()) {
                     pin = it
@@ -445,7 +447,7 @@ private fun DeleteSaleDialog(sale: Sale, model: RegisterModel, onDismiss: () -> 
         },
         confirmButton = {
             TextButton(onClick = {
-                model.deleteSale(sale.id, pin, onDismiss)
+                model.deleteSale(deletion, pin, onDismiss)
                 pin = ""
             }, enabled = !model.busy && pin.length == 6) {
                 Text(if (model.busy) "Menghapus…" else "Hapus")

@@ -139,17 +139,21 @@ internal fun encodeStockDeductions(deductions: Map<Long, Int>): String =
         for ((id, quantity) in deductions) put(id.toString(), quantity)
     }.toString()
 
+internal fun decodeStockDeductions(snapshot: String?): Map<Long, Int> {
+    if (snapshot == null) return emptyMap()
+    val deductions = JSONObject(snapshot)
+    return deductions.keys().asSequence().associate { it.toLong() to deductions.getInt(it) }
+}
+
 internal suspend fun restoreStockDeductions(
     snapshot: String?,
     stockName: String,
     exists: suspend (id: Long) -> Boolean,
+    skipIds: Set<Long> = emptySet(),
     restock: suspend (id: Long, quantity: Int) -> Int
 ) {
-    if (snapshot == null) return
-    val deductions = JSONObject(snapshot)
-    for (key in deductions.keys()) {
-        val id = key.toLong()
-        val quantity = deductions.getInt(key)
+    for ((id, quantity) in decodeStockDeductions(snapshot)) {
+        if (id in skipIds) continue
         if (quantity <= 0 || (restock(id, quantity) != 1 && exists(id))) {
             throw SaleInputException("Stok $stockName tidak dapat dikembalikan. Periksa apakah stok melebihi batas.")
         }

@@ -120,6 +120,10 @@ data class Receipt(
     @Relation(parentColumn = "id", entityColumn = "saleId") val charges: List<SaleCharge> = emptyList()
 )
 
+internal data class SaleDeletion(val sale: Sale, val countedIngredients: List<Ingredient>) {
+    val countedIds get() = countedIngredients.mapTo(mutableSetOf()) { it.id }
+}
+
 @Dao
 interface PosDao {
     @Query("SELECT * FROM CashierProfile ORDER BY id") fun cashiers(): Flow<List<CashierProfile>>
@@ -168,6 +172,13 @@ interface PosDao {
     @Insert suspend fun addStockCount(count: StockCount): Long
     @Insert suspend fun addStockCountLines(lines: List<StockCountLine>)
     @Transaction @Query("SELECT * FROM StockCount ORDER BY time DESC, id DESC") fun stockCounts(): Flow<List<StockCountReport>>
+    @Query("""
+        SELECT * FROM Ingredient WHERE EXISTS (
+            SELECT 1 FROM StockCountLine JOIN StockCount ON StockCount.id = StockCountLine.countId
+            WHERE StockCountLine.ingredientId = Ingredient.id AND StockCount.time > :time
+        ) ORDER BY name COLLATE NOCASE
+    """)
+    suspend fun ingredientsCountedAfter(time: Long): List<Ingredient>
     @Query("DELETE FROM RecipeLine WHERE productId = :productId") suspend fun deleteRecipe(productId: Long)
     @Insert suspend fun addRecipe(recipe: List<RecipeLine>)
     @Transaction
@@ -411,10 +422,23 @@ class Register(private val db: PosDatabase) {
         Receipt(sale.copy(id = id), lines, charges)
     }
 
-    suspend fun deleteSale(id: Long) {
+    internal suspend fun previewSaleDeletion(sale: Sale): SaleDeletion {
+        val deductionIds = decodeStockDeductions(sale.ingredientDeductions).keys
+        val counted = if (deductionIds.isEmpty()) emptyList() else {
+            dao.ingredientsCountedAfter(sale.time).filter { it.id in deductionIds }
+        }
+        return SaleDeletion(sale, counted)
+    }
+
+    internal suspend fun deleteSale(deletion: SaleDeletion) {
         db.withTransaction {
+            val id = deletion.sale.id
             val sale = dao.sale(id) ?: throw SaleInputException("Transaksi tidak ditemukan.")
-            restoreStockDeductions(sale.ingredientDeductions, "bahan", dao::ingredientExists) { ingredientId, quantity ->
+            val countedIds = previewSaleDeletion(sale).countedIds
+            if (countedIds != deletion.countedIds) {
+                throw SaleInputException("Stok opname berubah. Tutup konfirmasi lalu coba lagi.")
+            }
+            restoreStockDeductions(sale.ingredientDeductions, "bahan", dao::ingredientExists, countedIds) { ingredientId, quantity ->
                 dao.restockIngredient(ingredientId, quantity, MAX_INGREDIENT_STOCK)
             }
             restoreStockDeductions(sale.productDeductions, "produk", dao::productExists) { productId, quantity ->
