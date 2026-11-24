@@ -6,9 +6,9 @@ import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.Assert.assertNull
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -28,7 +28,7 @@ class BackupArchiveTest {
                     val entity = entities.getJSONObject(i)
                     val table = entity.getString("tableName")
                     db.execSQL(entity.getString("createSql").replace("\${TABLE_NAME}", table))
-                    val indexes = entity.getJSONArray("indices")
+                    val indexes = entity.optJSONArray("indices") ?: continue
                     for (j in 0 until indexes.length()) {
                         db.execSQL(indexes.getJSONObject(j).getString("createSql").replace("\${TABLE_NAME}", table))
                     }
