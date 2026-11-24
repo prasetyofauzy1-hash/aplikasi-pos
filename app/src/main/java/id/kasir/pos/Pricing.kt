@@ -110,19 +110,23 @@ internal fun orderTotals(subtotal: Long, charges: List<ExtraCharge>): OrderTotal
     return OrderTotals(subtotal, applied, total)
 }
 
-private val optionDraftLine = Regex("^(.*?)\\s*\\+\\s*(?:Rp\\.?\\s*)?([\\d.]+)$", RegexOption.IGNORE_CASE)
+private val optionDraftLine = Regex("^(.*)\\+([^+]*)$")
 
 /** Parses the owner's option draft: one option per line, optionally ending in "+5000" for an extra price. */
 internal fun parseOptionDraft(text: String): List<ProductOption>? = text.lines().map { it.trim() }.filter { it.isNotEmpty() }.map { line ->
     val match = optionDraftLine.matchEntire(line)
     val name = cleanOptionText(match?.groupValues?.get(1) ?: line, 40).trim()
-    val extra = match?.groupValues?.get(2)?.replace(".", "")?.takeIf { it.length <= 9 }?.toLongOrNull()
+    val extra = match?.groupValues?.get(2)?.let { parseRupiah(it, 9) }
     if (name.isEmpty() || (match != null && extra == null)) return null
     ProductOption(name, extra ?: 0)
 }.takeIf { options -> options.map { it.name.lowercase(indonesia) }.toSet().size == options.size }
 
 internal fun formatOptionDraft(options: List<ProductOption>): String =
-    options.joinToString("\n") { if (it.extraPrice > 0) "${it.name} +${it.extraPrice}" else it.name }
+    options.joinToString("\n") { when {
+        it.extraPrice > 0 -> "${it.name} +${it.extraPrice}"
+        optionDraftLine.matches(it.name) -> "${it.name} +0"
+        else -> it.name
+    } }
 
 internal fun SaleLine.detailLines(): List<String> = buildList {
     if (options.isNotBlank()) add(options)

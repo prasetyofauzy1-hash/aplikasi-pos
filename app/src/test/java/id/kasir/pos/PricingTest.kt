@@ -55,6 +55,10 @@ class PricingTest {
         assertEquals(listOf(ProductOption("Cup besar", 5_000), ProductOption("Less sugar", 0)),
             parseOptionDraft("Cup besar +Rp5.000\n\n Less sugar "))
         assertNull(parseOptionDraft("Less sugar\nless sugar"))
+        assertEquals(listOf(ProductOption("Cup besar", 5_000)), parseOptionDraft("Cup besar +Rp5.000,00"))
+        assertNull(parseOptionDraft("Cup besar +5.00"))
+        val free = listOf(ProductOption("Topping +2", 0))
+        assertEquals(free, parseOptionDraft(formatOptionDraft(free)))
         assertEquals("Cup besar +5000\nLess sugar", formatOptionDraft(parseOptionDraft("Cup besar +5000\nLess sugar")!!))
         val charges = listOf(ExtraCharge("PPN", percent = 1_100), ExtraCharge("Layanan", amount = 1_000, enabled = false))
         assertEquals(charges, chargesFromJson(chargesToJson(charges)))
@@ -77,5 +81,8 @@ class PricingTest {
         val printed = thermalReceipt(receipt, ThermalPaper.MM58).toString(Charsets.US_ASCII)
         assertTrue(printed, printed.contains("\nCatatan: tanpa es\nPromo -Rp3.000"))
         assertTrue(printed, printed.contains("PPN (11%)"))
+        val injected = receipt.copy(charges = listOf(SaleCharge(saleId = 9, name = "Biaya\u001BX", amount = 1_870)))
+        val printedInjected = thermalReceipt(injected, ThermalPaper.MM58).toString(Charsets.US_ASCII)
+        assertTrue(printedInjected, printedInjected.contains("Biaya?X"))
     }
 }
