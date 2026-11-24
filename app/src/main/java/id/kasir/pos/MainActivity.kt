@@ -408,7 +408,7 @@ private fun UnlockScreen(model: RegisterModel) {
 }
 
 @Composable
-private fun PinInput(
+internal fun PinInput(
     value: String, label: String, enabled: Boolean, isError: Boolean, imeAction: ImeAction,
     keyboardActions: KeyboardActions, change: (String) -> Unit
 ) {

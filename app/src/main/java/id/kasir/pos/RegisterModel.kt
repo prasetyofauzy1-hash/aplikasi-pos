@@ -38,6 +38,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    internal val cashiers = dao.cashiers().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -79,6 +80,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
+        private set
+    internal var activeCashierId by mutableStateOf(preferences.getLong("activeCashierId", OWNER_CASHIER_ID))
         private set
 
     fun clearError() { error = null }
@@ -173,6 +176,38 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private fun requireOwnerPin(pin: String) {
         if (pin.length != 6 || !pin.all { it in '0'..'9' }) throw SaleInputException("Masukkan PIN enam angka.")
         if (!verifyOwnerPin(pin)) throw SaleInputException("PIN salah. Coba lagi.")
+    }
+
+    internal fun selectCashier(id: Long) {
+        if (!unlocked || busy) return
+        setActiveCashier(id)
+    }
+
+    private fun setActiveCashier(id: Long) {
+        preferences.edit().putLong("activeCashierId", id).apply()
+        activeCashierId = id
+    }
+
+    internal fun saveCashier(id: Long, name: String, pin: String, onDone: () -> Unit) {
+        if (!unlocked) return
+        runAction("Profil kasir tidak dapat disimpan.") {
+            val normalized = normalizeCashierName(name)
+            if (normalized.isEmpty()) throw SaleInputException("Masukkan nama kasir.")
+            withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            val cashier = CashierProfile(id, normalized)
+            if (id == 0L) dao.addCashier(cashier) else dao.updateCashier(cashier)
+            onDone()
+        }
+    }
+
+    internal fun deleteCashier(id: Long, pin: String, onDone: () -> Unit) {
+        if (!unlocked || id == OWNER_CASHIER_ID) return
+        runAction("Profil kasir tidak dapat dihapus.") {
+            withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            dao.deleteCashier(id)
+            if (activeCashierId == id) setActiveCashier(OWNER_CASHIER_ID)
+            onDone()
+        }
     }
 
     fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
@@ -349,7 +384,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun sell(cart: Map<Long, Int>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
         runAction("Transaksi tidak dapat disimpan.") {
-            receipt = register.sell(cart, total, payment, cash, profile)
+            receipt = register.sell(cart, total, payment, cash, profile, activeCashierId)
             onDone()
         }
 

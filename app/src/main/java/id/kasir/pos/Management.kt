@@ -383,6 +383,7 @@ internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout:
                     Text(sale.storeName, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     if (sale.storeAddress.isNotBlank()) Text(sale.storeAddress, textAlign = TextAlign.Center, color = Muted)
                     Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.bodySmall)
+                    sale.cashierLabel?.let { Text(it, textAlign = TextAlign.Center, color = Muted) }
                 }
                 HorizontalDivider(color = Line)
                 receipt.lines.forEach { line ->
@@ -443,6 +444,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("04  /  PENGATURAN", "Profil toko", "Identitas ini muncul di struk transaksi baru.")
+        CashierProfilesSettings(model)
         StaticQrisSettings(model, onEdit = { saved = false })
         Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
             Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically,
