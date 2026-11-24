@@ -38,9 +38,10 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val sales = dao.sales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
+    internal fun dailyReceipts(period: ReportPeriod) = dao.dailyReceipts(period.start, period.end)
 
     var pinConfigured by mutableStateOf(preferences.contains("pinHash"))
         private set

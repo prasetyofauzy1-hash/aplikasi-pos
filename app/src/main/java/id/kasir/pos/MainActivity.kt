@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -89,7 +90,6 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 private fun RegisterApp(model: RegisterModel) {
     val menu by model.menu.collectAsStateWithLifecycle()
     val ingredients by model.ingredients.collectAsStateWithLifecycle()
-    val sales by model.sales.collectAsStateWithLifecycle()
     val cart by model.cart.collectAsStateWithLifecycle()
     val products = remember(menu, cart) { availableCatalog(menu, cart) }
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
@@ -102,7 +102,7 @@ private fun RegisterApp(model: RegisterModel) {
     val selectedId = editingId
     var showIngredients by rememberSaveable { mutableStateOf(false) }
     var editingIngredient by rememberSaveable { mutableStateOf<Long?>(null) }
-    val productsState = rememberSaveableStateHolder()
+    val tabState = rememberSaveableStateHolder()
     val receipt = model.receipt
     val closeSubScreen: () -> Unit = {
         if (!model.busy) {
@@ -184,10 +184,10 @@ private fun RegisterApp(model: RegisterModel) {
                         products, cart, model, cashierQuery, onQueryChange = { cashierQuery = it },
                         compact = short || narrow, searching = imeVisible, onCart = { orderScreen = "cart" }
                     )
-                    tab == Tab.PRODUCTS -> productsState.SaveableStateProvider("products") {
+                    tab == Tab.PRODUCTS -> tabState.SaveableStateProvider(Tab.PRODUCTS.name) {
                         ProductsScreen(menu, onEdit = { editingId = it }, onIngredients = { showIngredients = true })
                     }
-                    tab == Tab.HISTORY -> HistoryScreen(sales, model)
+                    tab == Tab.HISTORY -> tabState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
                     tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
                         model.dismissInitialOwnerEmailOffer()
                         model.clearError()
@@ -234,11 +234,7 @@ private fun RegisterScaffold(
                         selected = tab == entry,
                         onClick = { selectTab(entry) },
                         icon = { Icon(entry.icon, contentDescription = null, modifier = Modifier.size(21.dp)) },
-                        label = {
-                            Text(entry.label, fontWeight = FontWeight.SemiBold,
-                                style = if (narrow) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        label = { BottomTabLabel(entry, narrow) }
                     )
                 }
             }
@@ -246,6 +242,30 @@ private fun RegisterScaffold(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             content()
+        }
+    }
+}
+
+@Composable
+private fun BottomTabLabel(tab: Tab, narrow: Boolean) {
+    val style = (if (narrow) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+        .copy(fontWeight = FontWeight.SemiBold)
+    if (LocalDensity.current.fontScale <= 1f) {
+        Text(tab.label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    } else {
+        BoxWithConstraints {
+            val measurer = rememberTextMeasurer()
+            val availableWidth = constraints.maxWidth
+            val fontSize = remember(measurer, style, availableWidth) {
+                generateSequence(style.fontSize.value) { (it - 0.5f).takeIf { size -> size >= 6f } }
+                    .map { it.sp }
+                    .firstOrNull { size ->
+                        Tab.entries.all {
+                            measurer.measure(it.label, style.copy(fontSize = size), maxLines = 1).size.width <= availableWidth
+                        }
+                    } ?: 6.sp
+            }
+            Text(tab.label, style = style, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
