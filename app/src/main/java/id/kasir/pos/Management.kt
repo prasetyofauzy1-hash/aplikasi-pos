@@ -427,7 +427,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         produceState<Result<Bitmap>?>(initialValue = null) {
             if (selection != null) {
                 value = try {
-                    Result.success(withContext(Dispatchers.IO) { decodeStoreLogo(context, selection) })
+                    Result.success(withContext(Dispatchers.IO) { decodeStoreImage(context, selection) })
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -442,6 +442,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("04  /  PENGATURAN", "Profil toko", "Identitas ini muncul di struk transaksi baru.")
+        StaticQrisSettings(model, onEdit = { saved = false })
         Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
             Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {

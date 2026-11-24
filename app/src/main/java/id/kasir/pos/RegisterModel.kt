@@ -62,6 +62,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         preferences.getString("logo", null).orEmpty()
     ))
         private set
+    var qrisImageName by mutableStateOf(preferences.getString("qrisImage", null).orEmpty())
+        private set
     var receipt by mutableStateOf<Receipt?>(null)
         private set
     var busy by mutableStateOf(false)
@@ -369,6 +371,33 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             onDone()
         }
 
+    fun saveQrisImage(uri: Uri?) = runAction("Gambar QRIS tidak dapat disimpan. Periksa kembali file gambar.") {
+        val previous = qrisImageName
+        qrisImageName = withContext(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val file = uri?.let { File(context.filesDir, "qris-${UUID.randomUUID()}.png") }
+            try {
+                if (uri != null && file != null) {
+                    val bitmap = decodeStoreImage(context, uri, maxDimension = 1600)
+                    try {
+                        file.outputStream().use {
+                            if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) throw IOException()
+                        }
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+                val name = file?.name.orEmpty()
+                if (!preferences.edit().putString("qrisImage", name).commit()) throw IOException()
+                if (previous.isNotEmpty()) File(context.filesDir, previous).delete()
+                name
+            } catch (e: IOException) {
+                file?.delete()
+                throw e
+            }
+        }
+    }
+
     private fun runAction(fallback: String, work: suspend () -> Unit) {
         if (busy) return
         busy = true
@@ -395,23 +424,26 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 }
 
-internal fun decodeStoreLogo(context: Context, uri: Uri): Bitmap {
+internal fun decodeStoreImage(context: Context, uri: Uri, maxDimension: Int = 512): Bitmap {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw IOException()
     val options = BitmapFactory.Options().apply {
-        inSampleSize = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / inSampleSize > 512) {
-            inSampleSize *= 2
-        }
+        inSampleSize = storeImageSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
     }
     return context.contentResolver.openInputStream(uri)?.use {
         BitmapFactory.decodeStream(it, null, options)
     } ?: throw IOException()
 }
 
+internal fun storeImageSampleSize(width: Int, height: Int, maxDimension: Int): Int {
+    var sampleSize = 1
+    while (maxOf(width, height) / sampleSize > maxDimension) sampleSize *= 2
+    return sampleSize
+}
+
 private fun writeLogo(context: Context, uri: Uri): String {
-    val bitmap = decodeStoreLogo(context, uri)
+    val bitmap = decodeStoreImage(context, uri)
     val file = File(context.filesDir, "logo-${UUID.randomUUID()}.png")
     try {
         file.outputStream().use {
