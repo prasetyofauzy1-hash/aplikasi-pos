@@ -4,6 +4,8 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -20,7 +22,11 @@ private const val PROFILE_NAME = "store.json"
 private const val FORMAT = 1
 private val mediaName = Regex("(logo|qris)-[a-f0-9-]{36}\\.png")
 
-internal data class BackupProfile(val store: StoreProfile, val qris: String)
+internal data class BackupProfile(val store: StoreProfile, val qris: String) {
+    fun settings() = StoreSettings(name = store.name, address = store.address, logoName = store.logoName, qrisImage = qris)
+}
+
+internal fun StoreSettings.backupProfile() = BackupProfile(StoreProfile(name, address, logoName), qrisImage)
 
 internal class BackupException(message: String) : IOException(message)
 
@@ -40,7 +46,7 @@ internal class BackupArchive(private val context: Context, private val database:
                             while (schema.moveToNext()) copy.execSQL(schema.getString(0))
                         }
                         for (table in live.businessTables() + "room_master_table" + live.sequenceTable()) {
-                            if (table == "CartItem") continue
+                            if (table == "CartItem" || table == "StoreSettings") continue
                             val sqlTable = identifier(table)
                             live.query("SELECT * FROM $sqlTable").use { rows ->
                                 if (table == "sqlite_sequence") copy.execSQL("DELETE FROM $sqlTable")
@@ -81,7 +87,7 @@ internal class BackupArchive(private val context: Context, private val database:
         }
     }
 
-    suspend fun restore(source: File, applyProfile: (BackupProfile) -> Unit): BackupProfile {
+    suspend fun restore(source: File): BackupProfile {
         val staging = context.cacheDir.resolve("restore-${java.util.UUID.randomUUID()}")
         check(staging.mkdir())
         val dbName = "${staging.name}.db"
@@ -95,7 +101,7 @@ internal class BackupArchive(private val context: Context, private val database:
             val liveVersion = database.withTransaction { database.openHelper.writableDatabase.version }
             if (version > liveVersion) throw BackupException("Perbarui aplikasi sebelum memulihkan cadangan ini.")
             require(version > 0)
-            PosDatabase.backupDatabase(context, dbName).use { incoming ->
+            PosDatabase.withBackupDatabase(context, dbName) { incoming ->
                 val archived = incoming.openHelper.writableDatabase
                 for (file in staging.listFiles().orEmpty()) {
                     val target = File(context.filesDir, file.name)
@@ -106,52 +112,58 @@ internal class BackupArchive(private val context: Context, private val database:
                         newMedia += target
                     }
                 }
-                database.withTransaction {
-                    val live = database.openHelper.writableDatabase
-                    val tables = live.businessTables()
-                    val available = archived.businessTables()
-                    require(tables.toSet() == available.toSet())
-                    tables.asReversed().forEach { live.execSQL("DELETE FROM ${identifier(it)}") }
-                    for (table in tables) {
-                        val name = identifier(table)
-                        val columns = live.query("SELECT * FROM $name LIMIT 0").use { it.columnNames }
-                        val selection = columns.joinToString(", ", transform = ::identifier)
-                        live.compileStatement(insertSql(table, columns)).use { statement ->
-                            archived.query("SELECT $selection FROM $name").use { rows ->
-                                while (rows.moveToNext()) {
-                                    columns.indices.forEach { statement.bindValue(it + 1, rows.getValue(it)) }
-                                    statement.executeInsert()
-                                }
-                            }
-                        }
-                    }
-                    if ("sqlite_sequence" in archived.sequenceTable()) {
-                        archived.query("SELECT name, seq FROM sqlite_sequence").use { rows ->
-                            while (rows.moveToNext()) {
-                                val name = rows.getString(0)
-                                if (name !in tables) continue
-                                val seq = rows.getLong(1)
-                                live.execSQL(
-                                    "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?",
-                                    arrayOf(seq, name)
-                                )
-                                live.execSQL(
-                                    "INSERT INTO sqlite_sequence (name, seq) SELECT ?, ? " +
-                                        "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?)",
-                                    arrayOf(name, seq, name)
-                                )
-                            }
-                        }
-                    }
-                    applyProfile(profile)
+                withContext(NonCancellable) {
+                    restoreDatabase(archived, profile)
+                    restored = true
                 }
-                restored = true
             }
             return profile
         } finally {
             context.deleteDatabase(dbName)
             staging.deleteRecursively()
             if (!restored) newMedia.forEach { it.delete() }
+        }
+    }
+
+    private suspend fun restoreDatabase(archived: SupportSQLiteDatabase, profile: BackupProfile) {
+        database.withTransaction {
+            val live = database.openHelper.writableDatabase
+            val tables = live.businessTables()
+            require(tables.toSet() == archived.businessTables().toSet())
+            tables.asReversed().forEach { live.execSQL("DELETE FROM ${identifier(it)}") }
+            for (table in tables) {
+                if (table == "CartItem" || table == "StoreSettings") continue
+                val name = identifier(table)
+                val columns = live.query("SELECT * FROM $name LIMIT 0").use { it.columnNames }
+                val selection = columns.joinToString(", ", transform = ::identifier)
+                live.compileStatement(insertSql(table, columns)).use { statement ->
+                    archived.query("SELECT $selection FROM $name").use { rows ->
+                        while (rows.moveToNext()) {
+                            columns.indices.forEach { statement.bindValue(it + 1, rows.getValue(it)) }
+                            statement.executeInsert()
+                        }
+                    }
+                }
+            }
+            if (archived.sequenceTable().isNotEmpty()) {
+                archived.query("SELECT name, seq FROM sqlite_sequence").use { rows ->
+                    while (rows.moveToNext()) {
+                        val name = rows.getString(0)
+                        if (name !in tables) continue
+                        val seq = rows.getLong(1)
+                        live.execSQL(
+                            "UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?",
+                            arrayOf(seq, name)
+                        )
+                        live.execSQL(
+                            "INSERT INTO sqlite_sequence (name, seq) SELECT ?, ? " +
+                                "WHERE NOT EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = ?)",
+                            arrayOf(name, seq, name)
+                        )
+                    }
+                }
+            }
+            database.dao().saveStoreSettings(profile.settings())
         }
     }
 

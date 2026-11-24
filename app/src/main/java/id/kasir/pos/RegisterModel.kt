@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -60,14 +61,17 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     val emailAvailable get() = ownerAuth != null
     internal val cloudBackupAvailable get() = cloudBackup != null
-    var profile by mutableStateOf(StoreProfile(
-        preferences.getString("name", null) ?: "Toko Saya",
-        preferences.getString("address", null).orEmpty(),
-        preferences.getString("logo", null).orEmpty()
-    ))
-        private set
-    var qrisImageName by mutableStateOf(preferences.getString("qrisImage", null).orEmpty())
-        private set
+    private val legacyShop = BackupProfile(
+        StoreProfile(
+            preferences.getString("name", null) ?: "Toko Saya",
+            preferences.getString("address", null).orEmpty(),
+            preferences.getString("logo", null).orEmpty()
+        ),
+        preferences.getString("qrisImage", null).orEmpty()
+    )
+    private var shop by mutableStateOf(legacyShop)
+    val profile get() = shop.store
+    val qrisImageName get() = shop.qris
     var receipt by mutableStateOf<Receipt?>(null)
         private set
     var extraCharges by mutableStateOf(chargesFromJson(preferences.getString("extraCharges", null)))
@@ -88,6 +92,12 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     internal var activeCashierId by mutableStateOf(preferences.getLong("activeCashierId", OWNER_CASHIER_ID))
         private set
+
+    init {
+        viewModelScope.launch {
+            dao.storeSettings().collect { settings -> shop = settings?.backupProfile() ?: legacyShop }
+        }
+    }
 
     fun clearError() { error = null }
 
@@ -221,7 +231,6 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         val auth = ownerAuth ?: return
         val cloud = cloudBackup ?: return
         if (!unlocked || linkedOwnerEmail == null) return
-        val current = BackupProfile(profile, qrisImageName)
         val fallback = if (restore) "Cadangan tidak dapat dipulihkan. Periksa koneksi atau coba lagi."
             else "Cadangan tidak dapat dibuat. Periksa koneksi atau coba lagi."
         runAction(fallback) {
@@ -237,18 +246,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 try {
                     if (restore) {
                         cloud.download(session, file)
-                        var changed = false
-                        try {
-                            archive.restore(file) {
-                                changed = true
-                                saveBackupProfile(it)
-                            }
-                        } catch (e: Exception) {
-                            if (changed) saveBackupProfile(current)
-                            throw e
-                        }
+                        archive.restore(file)
                     } else {
-                        archive.create(file, current)
+                        archive.create(file, currentShop())
                         cloud.upload(session, file)
                         null
                     }
@@ -257,18 +257,15 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (restored != null) {
-                profile = restored.store
-                qrisImageName = restored.qris
+                shop = restored
+                setActiveCashier(OWNER_CASHIER_ID)
                 receipt = null
             }
             onDone()
         }
     }
 
-    private fun saveBackupProfile(state: BackupProfile) {
-        if (!preferences.edit().putString("name", state.store.name).putString("address", state.store.address)
-                .putString("logo", state.store.logoName).putString("qrisImage", state.qris).commit()) throw IOException()
-    }
+    private suspend fun currentShop() = dao.storeSettingsSnapshot()?.backupProfile() ?: legacyShop
 
     fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
@@ -549,24 +546,26 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun saveProfile(name: String, address: String, newLogo: Uri?, removeLogo: Boolean, onDone: () -> Unit) =
         runAction("Pengaturan tidak dapat disimpan. Periksa kembali file logo.") {
-            profile = withContext(Dispatchers.IO) {
+            shop = withContext(Dispatchers.IO) {
+                val current = currentShop()
                 val logo = when {
                     newLogo != null -> writeLogo(getApplication(), newLogo)
                     removeLogo -> ""
-                    else -> profile.logoName
+                    else -> current.store.logoName
                 }
-                if (!preferences.edit().putString("name", name).putString("address", address)
-                        .putString("logo", logo).commit()) throw IOException()
-                StoreProfile(name, address, logo)
+                current.copy(store = StoreProfile(name, address, logo)).also {
+                    dao.saveStoreSettings(it.settings())
+                }
             }
             onDone()
         }
 
     fun saveQrisImage(uri: Uri?) = runAction("Gambar QRIS tidak dapat disimpan. Periksa kembali file gambar.") {
-        val previous = qrisImageName
-        qrisImageName = withContext(Dispatchers.IO) {
+        shop = withContext(Dispatchers.IO) {
             val context = getApplication<Application>()
+            val current = currentShop()
             val file = uri?.let { File(context.filesDir, "qris-${UUID.randomUUID()}.png") }
+            var committed = false
             try {
                 if (uri != null && file != null) {
                     val bitmap = decodeStoreImage(context, uri, maxDimension = 1600)
@@ -578,12 +577,15 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
                         bitmap.recycle()
                     }
                 }
-                val name = file?.name.orEmpty()
-                if (!preferences.edit().putString("qrisImage", name).commit()) throw IOException()
-                if (previous.isNotEmpty()) File(context.filesDir, previous).delete()
-                name
-            } catch (e: IOException) {
-                file?.delete()
+                current.copy(qris = file?.name.orEmpty()).also {
+                    withContext(NonCancellable) {
+                        dao.saveStoreSettings(it.settings())
+                        committed = true
+                        if (current.qris.isNotEmpty()) File(context.filesDir, current.qris).delete()
+                    }
+                }
+            } catch (e: Exception) {
+                if (!committed) file?.delete()
                 throw e
             }
         }
