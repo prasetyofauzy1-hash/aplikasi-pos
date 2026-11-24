@@ -170,7 +170,7 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
     val total = cartTotal(products, model.cart)
-    val cash = amount.toLongOrNull()
+    val cash = parseRupiah(amount, maxDigits = 18)
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -184,11 +184,13 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
             }
         }
         if (method == Payment.CASH) {
-            OutlinedTextField(amount, { amount = it.filter { c -> c in '0'..'9' }.take(18); model.clearError() },
-                modifier = Modifier.fillMaxWidth(), label = { Text("Uang diterima") }, prefix = { Text("Rp ") },
+            OutlinedTextField(amount, { amount = it; model.clearError() },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Uang diterima") },
+                prefix = { if (!amount.trimStart().startsWith("Rp", ignoreCase = true)) Text("Rp ") },
                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedButton(onClick = { amount = total.toString(); model.clearError() }) { Text("Isi uang pas") }
             MetricRow("Kembalian", rupiah(((cash ?: 0) - total).coerceAtLeast(0)), true)
+            if (amount.isNotBlank() && cash == null) ErrorText("Gunakan format Rupiah, misalnya Rp19.000,00.")
             if (cash != null && cash < total) ErrorText("Uang tunai kurang ${rupiah(total - cash)}.")
         } else {
             EmptyPanel("QRIS dicatat manual", "Pastikan dana sudah diterima sebelum menyimpan. Aplikasi tidak memproses pembayaran QRIS.")
@@ -196,7 +198,7 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
         ErrorText(model.error)
         Button(
             onClick = { model.sell(total, method, cash, onPaid) },
-            enabled = model.cart.isNotEmpty() && !model.busy && (method == Payment.QRIS || (cash ?: 0) >= total),
+            enabled = model.cart.isNotEmpty() && !model.busy && (method == Payment.QRIS || (cash != null && cash >= total)),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) { Text(if (model.busy) "Menyimpan…" else "Simpan transaksi") }
     }

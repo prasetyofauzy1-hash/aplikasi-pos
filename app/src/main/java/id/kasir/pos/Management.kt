@@ -109,16 +109,18 @@ internal fun ProductForm(product: Product, model: RegisterModel, onClose: () -> 
     var price by rememberSaveable(product.id) { mutableStateOf(if (product.id == 0L) "" else product.price.toString()) }
     var stock by rememberSaveable(product.id) { mutableStateOf(if (product.id == 0L) "" else product.stock.toString()) }
     var confirming by rememberSaveable { mutableStateOf(false) }
-    val numericPrice = price.toLongOrNull()
+    val numericPrice = parseRupiah(price, maxDigits = 9)
     val numericStock = stock.toIntOrNull()
     Column(Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Header("INVENTARIS", if (product.id == 0L) "Produk baru" else "Edit produk", "Lengkapi informasi yang digunakan di kasir.")
         OutlinedTextField(name, { name = it.take(70) }, Modifier.fillMaxWidth(), label = { Text("Nama produk") }, singleLine = true)
         OutlinedTextField(category, { category = it.take(40) }, Modifier.fillMaxWidth(), label = { Text("Kategori") }, singleLine = true)
-        OutlinedTextField(price, { price = it.filter { c -> c in '0'..'9' }.take(9) }, Modifier.fillMaxWidth(),
-            label = { Text("Harga jual") }, prefix = { Text("Rp ") }, singleLine = true,
+        OutlinedTextField(price, { price = it }, Modifier.fillMaxWidth(),
+            label = { Text("Harga jual") },
+            prefix = { if (!price.trimStart().startsWith("Rp", ignoreCase = true)) Text("Rp ") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        if (price.isNotBlank() && numericPrice == null) ErrorText("Gunakan format Rupiah hingga 9 digit, misalnya Rp19.000,00.")
         OutlinedTextField(stock, { stock = it.filter { c -> c in '0'..'9' }.take(5) }, Modifier.fillMaxWidth(),
             label = { Text("Stok tersedia") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         ErrorText(model.error)
