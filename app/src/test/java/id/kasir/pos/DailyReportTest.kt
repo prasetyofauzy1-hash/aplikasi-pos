@@ -27,6 +27,17 @@ class DailyReportTest {
         assertEquals(25 * 3_600_000L, fall.end - fall.start)
     }
 
+    @Test fun repeatedMidnightBelongsToTheNewDayFromItsFirstOccurrence() {
+        val havana = TimeZone.getTimeZone("America/Havana")
+        val date = reportDate(2026, Calendar.NOVEMBER, 1)
+        val firstMidnight = date + 4 * 3_600_000L
+        val period = reportPeriod(date, havana)
+
+        assertEquals(firstMidnight, period.start)
+        assertEquals(firstMidnight, reportPeriod(moveReportDate(date, -1), havana).end)
+        assertEquals(25 * 3_600_000L, period.end - period.start)
+    }
+
     @Test fun reconcilesMethodsAndProductsUsingRecordedSaleAndLineValues() {
         val cash = Sale(id = 1, time = 5, total = 30_000, paid = 50_000, method = Payment.CASH.label,
             storeName = "Jus.go", storeAddress = "Manahan", logoName = "")

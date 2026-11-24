@@ -28,10 +28,17 @@ internal data class ReportPeriod(val start: Long, val end: Long)
 internal fun reportPeriod(date: Long, zone: TimeZone): ReportPeriod {
     fun midnight(value: Long): Long {
         val day = reportCalendar(value)
-        return Calendar.getInstance(zone).apply {
+        val midnight = Calendar.getInstance(zone).apply {
             clear()
             set(day[Calendar.YEAR], day[Calendar.MONTH], day[Calendar.DAY_OF_MONTH])
         }.timeInMillis
+        val offsetBefore = zone.getOffset(midnight - 86_400_000L)
+        val earlierMidnight = value - offsetBefore
+        return if (earlierMidnight < midnight && zone.getOffset(earlierMidnight) == offsetBefore) {
+            earlierMidnight
+        } else {
+            midnight
+        }
     }
     return ReportPeriod(midnight(date), midnight(moveReportDate(date, 1)))
 }
