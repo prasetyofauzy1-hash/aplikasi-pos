@@ -13,8 +13,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,6 +38,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     val products = dao.products().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val sales = dao.sales().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val cart = dao.cart().map { items -> items.associate { it.productId to it.quantity } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     var pinConfigured by mutableStateOf(preferences.contains("pinHash"))
         private set
@@ -54,8 +59,6 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         preferences.getString("address", null).orEmpty(),
         preferences.getString("logo", null).orEmpty()
     ))
-        private set
-    var cart by mutableStateOf<Map<Long, Int>>(emptyMap())
         private set
     var receipt by mutableStateOf<Receipt?>(null)
         private set
@@ -243,32 +246,54 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun adjust(product: Product, delta: Int) {
-        val old = cart[product.id] ?: 0
-        val next = old + delta
-        if (delta > 0 && next > product.stock) return
-        cart = if (next <= 0) cart - product.id else cart + (product.id to next)
+    fun adjust(product: Product, delta: Int) =
+        changeCartQuantity(product) { (it.toLong() + delta).coerceAtLeast(0L) }
+
+    fun setQuantity(product: Product, quantity: Int) = changeCartQuantity(product) { quantity.toLong() }
+
+    private fun changeCartQuantity(product: Product, quantity: (Int) -> Long) {
+        if (busy) return
+        viewModelScope.launch {
+            try {
+                database.withTransaction {
+                    val old = dao.cartQuantity(product.id)
+                    val next = quantity(old ?: 0)
+                    if (next !in 0L..Int.MAX_VALUE.toLong()) return@withTransaction
+                    val previous = if (old == null) emptyMap() else mapOf(product.id to old)
+                    val updated = updateCartQuantity(previous, product, next.toInt())[product.id]
+                    if (updated == old) return@withTransaction
+                    if (updated == null) dao.removeCartItem(product.id)
+                    else dao.putCartItem(CartItem(product.id, updated))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                error = "Keranjang tidak dapat diperbarui."
+            }
+        }
     }
 
     fun saveProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
-        if (product.id == 0L) dao.add(product) else dao.update(product)
-        val inCart = cart[product.id] ?: 0
-        if (product.stock == 0) cart = cart - product.id
-        else if (inCart > product.stock) cart = cart + (product.id to product.stock)
+        database.withTransaction {
+            if (product.id == 0L) dao.add(product) else {
+                dao.update(product)
+                if (product.stock == 0) dao.removeCartItem(product.id)
+                else dao.capCartQuantity(product.id, product.stock)
+            }
+        }
         onDone()
     }
 
     fun deleteProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat dihapus.") {
         dao.delete(product.id)
-        cart = cart - product.id
         onDone()
     }
 
-    fun sell(total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) = runAction("Transaksi tidak dapat disimpan.") {
-        receipt = register.sell(cart, total, payment, cash, profile)
-        cart = emptyMap()
-        onDone()
-    }
+    fun sell(cart: Map<Long, Int>, total: Long, payment: Payment, cash: Long?, onDone: () -> Unit) =
+        runAction("Transaksi tidak dapat disimpan.") {
+            receipt = register.sell(cart, total, payment, cash, profile)
+            onDone()
+        }
 
     fun openReceipt(id: Long) = runAction("Struk tidak dapat dibuka.") {
         receipt = dao.receipt(id) ?: throw SaleInputException("Struk tidak ditemukan.")
@@ -298,7 +323,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 work()
-            } catch (e: kotlinx.coroutines.CancellationException) {
+            } catch (e: CancellationException) {
                 throw e
             } catch (e: SaleInputException) {
                 error = e.message

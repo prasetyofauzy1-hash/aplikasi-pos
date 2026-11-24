@@ -1,7 +1,9 @@
 package id.kasir.pos
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -31,12 +33,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModelProvider
@@ -84,11 +88,13 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 private fun RegisterApp(model: RegisterModel) {
     val products by model.products.collectAsStateWithLifecycle()
     val sales by model.sales.collectAsStateWithLifecycle()
+    val cart by model.cart.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableStateOf(if (model.firstUnlock) Tab.SETTINGS else Tab.REGISTER) }
     var showEmailLink by rememberSaveable {
         mutableStateOf(model.initialOwnerEmailOffer)
     }
     var orderScreen by rememberSaveable { mutableStateOf("") }
+    var cashierQuery by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val selectedId = editingId
     val receipt = model.receipt
@@ -105,54 +111,65 @@ private fun RegisterApp(model: RegisterModel) {
     }
     val main = receipt == null && orderScreen.isEmpty() && selectedId == null
     BackHandler(enabled = !main, onBack = closeSubScreen)
-    Scaffold(
-        containerColor = Paper,
-        topBar = {
-            if (main) BrandBar(model.profile)
-            else SubBar(when {
-                receipt != null -> "Struk transaksi"
-                selectedId != null -> if (selectedId == 0L) "Tambah produk" else "Edit produk"
-                orderScreen == "payment" -> "Pembayaran"
-                else -> "Keranjang"
-            }, closeSubScreen)
-        },
-        bottomBar = {
-            if (main) NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
-                Tab.entries.forEach { entry ->
-                    NavigationBarItem(
-                        selected = tab == entry,
-                        onClick = { if (!model.busy) { tab = entry; model.clearError() } },
-                        icon = { Icon(entry.icon, contentDescription = null, modifier = Modifier.size(21.dp)) },
-                        label = { Text(entry.label, fontWeight = FontWeight.SemiBold) }
-                    )
-                }
-            }
+    val selectTab: (Tab) -> Unit = { selected ->
+        if (!model.busy) {
+            tab = selected
+            model.clearError()
         }
-    ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
-            when {
-                receipt != null -> ReceiptScreen(receipt, closeSubScreen)
-                selectedId != null -> {
-                    val product = if (selectedId == 0L) Product(name = "", category = "", price = 0, stock = 0)
-                        else products.firstOrNull { it.id == selectedId }
-                    if (product != null) key(selectedId) {
-                        ProductForm(product, model, onClose = { editingId = null })
-                    } else {
-                        Box(Modifier.padding(20.dp)) {
-                            EmptyPanel("Produk tidak tersedia", "Kembali ke daftar dan buka produk lagi.")
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val short = maxHeight < 400.dp
+        val narrow = maxWidth < 360.dp || LocalDensity.current.fontScale >= 1.3f
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        Row(Modifier.fillMaxSize()) {
+            if (main && short) CompactNavigation(tab, selectTab)
+            RegisterScaffold(
+                modifier = Modifier.weight(1f),
+                model = model,
+                tab = tab,
+                selectTab = selectTab,
+                main = main,
+                short = short,
+                narrow = narrow,
+                imeVisible = imeVisible,
+                title = when {
+                    receipt != null -> "Struk transaksi"
+                    selectedId != null -> if (selectedId == 0L) "Tambah produk" else "Edit produk"
+                    orderScreen == "payment" -> "Pembayaran"
+                    else -> "Keranjang"
+                },
+                closeSubScreen = closeSubScreen
+            ) {
+                when {
+                    receipt != null -> ReceiptScreen(receipt, fromCheckout = tab == Tab.REGISTER, onDone = closeSubScreen)
+                    selectedId != null -> {
+                        val product = if (selectedId == 0L) Product(name = "", category = "", price = 0, stock = 0)
+                            else products.firstOrNull { it.id == selectedId }
+                        if (product != null) key(selectedId) {
+                            ProductForm(product, model, onClose = { editingId = null })
+                        } else {
+                            Box(Modifier.padding(20.dp)) {
+                                EmptyPanel("Produk tidak tersedia", "Kembali ke daftar dan buka produk lagi.")
+                            }
                         }
                     }
+                    orderScreen == "cart" -> CartScreen(products, cart, model, short, onPay = { orderScreen = "payment" })
+                    orderScreen == "payment" -> PaymentScreen(products, cart, model, onPaid = {
+                        cashierQuery = ""
+                        orderScreen = ""
+                    })
+                    tab == Tab.REGISTER -> CashierScreen(
+                        products, cart, model, cashierQuery, onQueryChange = { cashierQuery = it },
+                        compact = short || narrow, searching = imeVisible, onCart = { orderScreen = "cart" }
+                    )
+                    tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
+                    tab == Tab.HISTORY -> HistoryScreen(sales, model)
+                    tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
+                        model.dismissInitialOwnerEmailOffer()
+                        model.clearError()
+                        showEmailLink = true
+                    })
                 }
-                orderScreen == "cart" -> CartScreen(products, model, onPay = { orderScreen = "payment" })
-                orderScreen == "payment" -> PaymentScreen(products, model, onPaid = { orderScreen = "" })
-                tab == Tab.REGISTER -> CashierScreen(products, model, onCart = { orderScreen = "cart" })
-                tab == Tab.PRODUCTS -> ProductsScreen(products, onEdit = { editingId = it })
-                tab == Tab.HISTORY -> HistoryScreen(sales, model)
-                tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
-                    model.dismissInitialOwnerEmailOffer()
-                    model.clearError()
-                    showEmailLink = true
-                })
             }
         }
     }
@@ -166,28 +183,92 @@ private fun RegisterApp(model: RegisterModel) {
 }
 
 @Composable
-private fun BrandBar(profile: StoreProfile) {
+private fun RegisterScaffold(
+    modifier: Modifier,
+    model: RegisterModel,
+    tab: Tab,
+    selectTab: (Tab) -> Unit,
+    main: Boolean,
+    short: Boolean,
+    narrow: Boolean,
+    imeVisible: Boolean,
+    title: String,
+    closeSubScreen: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Scaffold(
+        modifier = modifier,
+        containerColor = Paper,
+        topBar = {
+            if (main && !short) BrandBar(model.profile, narrow)
+            if (!main) SubBar(title, short, closeSubScreen)
+        },
+        bottomBar = {
+            if (main && !short && !imeVisible) NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
+                Tab.entries.forEach { entry ->
+                    NavigationBarItem(
+                        selected = tab == entry,
+                        onClick = { selectTab(entry) },
+                        icon = { Icon(entry.icon, contentDescription = null, modifier = Modifier.size(21.dp)) },
+                        label = {
+                            Text(entry.label, fontWeight = FontWeight.SemiBold,
+                                style = if (narrow) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    )
+                }
+            }
+        }
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun CompactNavigation(tab: Tab, selectTab: (Tab) -> Unit) {
+    Column(
+        Modifier.fillMaxHeight().width(72.dp).background(Color.White)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Tab.entries.forEach { entry ->
+            NavigationRailItem(selected = tab == entry, onClick = { selectTab(entry) },
+                icon = { Icon(entry.icon, contentDescription = entry.label) })
+        }
+    }
+}
+
+@Composable
+private fun BrandBar(profile: StoreProfile, narrow: Boolean) {
     Surface(color = Paper) {
         Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
+            Modifier.fillMaxWidth().statusBarsPadding().padding(
+                horizontal = if (narrow) 12.dp else 20.dp, vertical = if (narrow) 6.dp else 12.dp
+            ),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StoreLogo(profile.logoName, Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)))
+            StoreLogo(profile.logoName, Modifier.size(if (narrow) 32.dp else 40.dp).clip(RoundedCornerShape(13.dp)))
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text("Kasir Rapi", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                Text(profile.name, color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                Text("Kasir Rapi", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(profile.name, color = Muted, style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Box(Modifier.clip(RoundedCornerShape(50)).background(SoftGreen).padding(horizontal = 10.dp, vertical = 6.dp)) {
-                Text("●  Offline", color = Pine, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
+            Box(Modifier.clip(RoundedCornerShape(50)).background(SoftGreen).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Text(if (narrow) "Offline" else "●  Offline", color = Pine, fontWeight = FontWeight.SemiBold, fontSize = 11.sp)
             }
         }
     }
 }
 
 @Composable
-private fun SubBar(title: String, onBack: () -> Unit) {
+private fun SubBar(title: String, short: Boolean, onBack: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = if (short) 0.dp else 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         TextButton(onClick = onBack) { Text("‹  Kembali") }
@@ -318,4 +399,21 @@ internal fun ShareReceiptButton(receipt: Receipt) {
         }
         context.startActivity(Intent.createChooser(share, "Bagikan struk"))
     }) { Text("Bagikan struk") }
+}
+
+@Composable
+internal fun EmailReceiptButton(receipt: Receipt) {
+    val context = LocalContext.current
+    var emailUnavailable by remember { mutableStateOf(false) }
+    OutlinedButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = {
+        val subject = Uri.encode("Struk ${ticket(receipt.sale.id)} • ${receipt.sale.storeName}")
+        val body = Uri.encode(receipt.asText())
+        try {
+            context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:?subject=$subject&body=$body")))
+            emailUnavailable = false
+        } catch (_: ActivityNotFoundException) {
+            emailUnavailable = true
+        }
+    }) { Text("Kirim via Email") }
+    if (emailUnavailable) ErrorText("Tidak ada aplikasi email. Pasang aplikasi email atau pilih Bagikan struk.")
 }
