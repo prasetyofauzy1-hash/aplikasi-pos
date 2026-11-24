@@ -51,6 +51,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var unlocked by mutableStateOf(false)
         private set
+    internal var profitUnlocked by mutableStateOf(false)
+        private set
+    private var profitAccessRequest = 0L
     var firstUnlock by mutableStateOf(false)
         private set
     var initialOwnerEmailOffer by mutableStateOf(false)
@@ -267,6 +270,20 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun currentShop() = dao.storeSettingsSnapshot()?.backupProfile() ?: legacyShop
 
+    internal fun unlockProfit(pin: String) {
+        if (!unlocked || profitUnlocked) return
+        val request = profitAccessRequest
+        runAction("PIN tidak dapat diperiksa.") {
+            withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            if (unlocked && request == profitAccessRequest) profitUnlocked = true
+        }
+    }
+
+    internal fun lockProfit() {
+        profitAccessRequest++
+        profitUnlocked = false
+    }
+
     fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
         if (unlocked || !pinConfigured || resettingPin) return
@@ -308,6 +325,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     fun lock() {
         if (busy) return
         receipt = null
+        lockProfit()
         dismissInitialOwnerEmailOffer()
         clearError()
         unlocked = false
@@ -413,13 +431,15 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
         database.withTransaction {
-            if (recipe.isEmpty() && (product.id == 0L || dao.menuById(setOf(product.id)).any { it.recipe.isNotEmpty() })) {
+            val current = if (product.id == 0L) null else dao.menuById(setOf(product.id)).singleOrNull()
+            if (recipe.isEmpty() && (product.id == 0L || current?.recipe?.isNotEmpty() == true)) {
                 throw SaleInputException("Tambahkan setidaknya satu bahan ke resep.")
             }
             if (recipe.values.any { it !in 1..MAX_INGREDIENT_STOCK }) {
                 throw SaleInputException("Jumlah setiap bahan harus lebih dari 0.")
             }
-            val storedProduct = if (recipe.isEmpty()) product else product.copy(stock = 0)
+            val storedProduct = if (recipe.isEmpty()) product.copy(directHpp = current?.product?.directHpp)
+                else product.copy(stock = 0, directHpp = null)
             val id = if (product.id == 0L) dao.add(storedProduct) else {
                 dao.update(storedProduct)
                 product.id
@@ -448,6 +468,26 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             else dao.updateIngredient(ingredient.id, ingredient.name, ingredient.stock)
         }
         onDone()
+    }
+
+    internal fun saveIngredientCost(id: Long, cost: Long?, quantity: Int?, onDone: () -> Unit) {
+        if (!profitUnlocked) return
+        runAction("Biaya bahan tidak dapat disimpan.") {
+            val valid = (cost == null && quantity == null) ||
+                (cost != null && cost in 0..MAX_PURCHASE_COST && quantity != null && quantity in 1..MAX_INGREDIENT_STOCK)
+            if (!valid) throw SaleInputException("Isi harga dan jumlah pembelian yang valid.")
+            if (dao.setIngredientCost(id, cost, quantity) != 1) throw SaleInputException("Bahan tidak ditemukan.")
+            onDone()
+        }
+    }
+
+    internal fun saveDirectHpp(id: Long, cost: Long?, onDone: () -> Unit) {
+        if (!profitUnlocked) return
+        runAction("HPP produk tidak dapat disimpan.") {
+            if (cost != null && cost !in 0..MAX_PURCHASE_COST) throw SaleInputException("Isi HPP yang valid.")
+            if (dao.setDirectHpp(id, cost) != 1) throw SaleInputException("Produk tanpa resep tidak ditemukan.")
+            onDone()
+        }
     }
 
     fun deleteIngredient(id: Long, onDone: () -> Unit) = runAction("Bahan tidak dapat dihapus.") {

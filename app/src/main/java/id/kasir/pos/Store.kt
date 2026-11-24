@@ -34,7 +34,8 @@ data class Product(
     val stock: Int,
     @ColumnInfo(defaultValue = "") val options: String = "",
     @ColumnInfo(defaultValue = "0") val promoPercent: Int = 0,
-    @ColumnInfo(defaultValue = "0") val promoAmount: Long = 0
+    @ColumnInfo(defaultValue = "0") val promoAmount: Long = 0,
+    val directHpp: Long? = null
 )
 
 @Entity(
@@ -100,7 +101,8 @@ data class SaleLine(
     val productId: Long? = null,
     @ColumnInfo(defaultValue = "") val options: String = "",
     @ColumnInfo(defaultValue = "") val note: String = "",
-    @ColumnInfo(defaultValue = "0") val discount: Long = 0
+    @ColumnInfo(defaultValue = "0") val discount: Long = 0,
+    val unitHpp: Long? = null
 )
 
 @Entity(
@@ -138,6 +140,8 @@ interface PosDao {
     @Transaction @Query("SELECT * FROM Product WHERE id IN (:ids)") suspend fun menuById(ids: Set<Long>): List<MenuItem>
     @Insert suspend fun add(product: Product): Long
     @Update suspend fun update(product: Product)
+    @Query("UPDATE Product SET directHpp = :hpp WHERE id = :id AND NOT EXISTS(SELECT 1 FROM RecipeLine WHERE productId = :id)")
+    suspend fun setDirectHpp(id: Long, hpp: Long?): Int
     @Query("DELETE FROM Product WHERE id = :id") suspend fun delete(id: Long)
     @Query("SELECT * FROM CartItem") fun cart(): Flow<List<CartItem>>
     @Query("SELECT * FROM CartItem") suspend fun cartSnapshot(): List<CartItem>
@@ -162,6 +166,8 @@ interface PosDao {
     @Insert suspend fun addIngredient(ingredient: Ingredient)
     @Query("UPDATE Ingredient SET name = :name, stock = :stock WHERE id = :id")
     suspend fun updateIngredient(id: Long, name: String, stock: Int)
+    @Query("UPDATE Ingredient SET purchaseCost = :cost, purchaseQuantity = :quantity WHERE id = :id")
+    suspend fun setIngredientCost(id: Long, cost: Long?, quantity: Int?): Int
     @Query("DELETE FROM Ingredient WHERE id = :id") suspend fun deleteIngredient(id: Long)
     @Query("UPDATE Ingredient SET stock = stock + :quantity WHERE id = :id AND stock <= :maxStock - :quantity")
     suspend fun restockIngredient(id: Long, quantity: Int, maxStock: Int): Int
@@ -198,12 +204,21 @@ interface PosDao {
 @Database(
     entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class,
         CartItem::class, CashierProfile::class, StockCount::class, StockCountLine::class, SaleCharge::class, StoreSettings::class],
-    version = 9
+    version = 10
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addProfitCosts = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE Ingredient ADD COLUMN purchaseCost INTEGER")
+                db.execSQL("ALTER TABLE Ingredient ADD COLUMN purchaseQuantity INTEGER")
+                db.execSQL("ALTER TABLE Product ADD COLUMN directHpp INTEGER")
+                db.execSQL("ALTER TABLE SaleLine ADD COLUMN unitHpp INTEGER")
+            }
+        }
+
         private val addSaleStockDeductions = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE Sale ADD COLUMN ingredientDeductions TEXT")
@@ -299,7 +314,7 @@ abstract class PosDatabase : RoomDatabase() {
         private fun builder(context: Context, name: String) = Room.databaseBuilder(context, PosDatabase::class.java, name)
             .addMigrations(
                 addCart, addIngredients, addSaleLineProductId, addCashierProfiles,
-                addStockCounts, addVariantsDiscountsCharges, addStoreSettings, addSaleStockDeductions
+                addStockCounts, addVariantsDiscountsCharges, addStoreSettings, addSaleStockDeductions, addProfitCosts
             )
 
         fun open(context: Context): PosDatabase = builder(context, "kasir-rapi.db")
@@ -414,7 +429,8 @@ class Register(private val db: PosDatabase) {
                 throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
             }
         }
-        val lines = order.lines.map { it.copy(saleId = id) }
+        val unitCosts = menu.associate { it.product.id to it.unitHpp() }
+        val lines = order.lines.map { it.copy(saleId = id, unitHpp = unitCosts[it.productId]) }
         dao.addLines(lines)
         val charges = order.charges.map { it.copy(saleId = id) }
         if (charges.isNotEmpty()) dao.addCharges(charges)

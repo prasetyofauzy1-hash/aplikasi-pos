@@ -17,7 +17,9 @@ data class Ingredient(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     @ColumnInfo(collate = ColumnInfo.NOCASE) val name: String,
     val unit: String,
-    val stock: Int
+    val stock: Int,
+    val purchaseCost: Long? = null,
+    val purchaseQuantity: Int? = null
 )
 
 @Entity(
