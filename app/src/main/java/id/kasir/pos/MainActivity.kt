@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -211,11 +212,7 @@ private fun RegisterScaffold(
                         selected = tab == entry,
                         onClick = { selectTab(entry) },
                         icon = { Icon(entry.icon, contentDescription = null, modifier = Modifier.size(21.dp)) },
-                        label = {
-                            Text(entry.label, fontWeight = FontWeight.SemiBold,
-                                style = if (narrow) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        label = { BottomTabLabel(entry, narrow) }
                     )
                 }
             }
@@ -223,6 +220,30 @@ private fun RegisterScaffold(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             content()
+        }
+    }
+}
+
+@Composable
+private fun BottomTabLabel(tab: Tab, narrow: Boolean) {
+    val style = (if (narrow) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium)
+        .copy(fontWeight = FontWeight.SemiBold)
+    if (LocalDensity.current.fontScale <= 1f) {
+        Text(tab.label, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    } else {
+        BoxWithConstraints {
+            val measurer = rememberTextMeasurer()
+            val availableWidth = constraints.maxWidth
+            val fontSize = remember(measurer, style, availableWidth) {
+                generateSequence(style.fontSize.value) { (it - 0.5f).takeIf { size -> size >= 6f } }
+                    .map { it.sp }
+                    .firstOrNull { size ->
+                        Tab.entries.all {
+                            measurer.measure(it.label, style.copy(fontSize = size), maxLines = 1).size.width <= availableWidth
+                        }
+                    } ?: 6.sp
+            }
+            Text(tab.label, style = style, fontSize = fontSize, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
