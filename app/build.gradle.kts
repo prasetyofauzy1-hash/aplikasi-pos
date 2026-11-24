@@ -11,8 +11,14 @@ val localProperties = Properties().apply {
     providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
         .asText.orNull?.reader()?.use { load(it) }
 }
-val firebaseApiKey = localProperties.getProperty("FIREBASE_API_KEY", "").trim()
-    .replace("\\", "\\\\").replace("\"", "\\\"")
+fun firebaseSetting(name: String, default: String = "") =
+    (localProperties.getProperty(name) ?: providers.environmentVariable(name).orNull ?: default)
+        .trim().replace("\\", "\\\\").replace("\"", "\\\"")
+
+val firebaseApiKey = firebaseSetting("FIREBASE_API_KEY")
+val firebaseBackupUrl = firebaseSetting(
+    "FIREBASE_BACKUP_URL", "https://aplikasi-pos-3d3a7-default-rtdb.asia-southeast1.firebasedatabase.app"
+)
 
 android {
     namespace = "id.kasir.pos"
@@ -23,12 +29,15 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
+        buildConfigField("String", "FIREBASE_BACKUP_URL", "\"$firebaseBackupUrl\"")
     }
     buildFeatures {
         compose = true
         buildConfig = true
     }
+    sourceSets.getByName("androidTest").assets.srcDir("schemas")
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -53,4 +62,5 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("androidx.test:runner:1.6.2")
 }

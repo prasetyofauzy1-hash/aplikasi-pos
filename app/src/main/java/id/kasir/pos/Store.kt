@@ -16,6 +16,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.room.Upsert
 import androidx.room.migration.Migration
 import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
@@ -57,6 +58,16 @@ private val cashierNameWhitespace = Regex("[\\s\\p{Z}\\u0085]+")
 
 internal fun normalizeCashierName(name: String): String =
     name.replace(cashierNameWhitespace, " ").trim()
+
+@Entity
+data class StoreSettings(
+    @PrimaryKey val id: Int = 1,
+    val name: String,
+    val address: String,
+    val logoName: String,
+    val qrisImage: String,
+    val extraCharges: String
+)
 
 @Entity
 data class Sale(
@@ -114,6 +125,9 @@ interface PosDao {
     @Insert suspend fun addCashier(cashier: CashierProfile)
     @Update suspend fun updateCashier(cashier: CashierProfile)
     @Query("DELETE FROM CashierProfile WHERE id = :id") suspend fun deleteCashier(id: Long)
+    @Query("SELECT * FROM StoreSettings WHERE id = 1") fun storeSettings(): Flow<StoreSettings?>
+    @Query("SELECT * FROM StoreSettings WHERE id = 1") suspend fun storeSettingsSnapshot(): StoreSettings?
+    @Upsert suspend fun saveStoreSettings(settings: StoreSettings)
     @Transaction @Query("SELECT * FROM Product ORDER BY name COLLATE NOCASE") fun menu(): Flow<List<MenuItem>>
     @Transaction @Query("SELECT * FROM Product WHERE id IN (:ids)") suspend fun menuById(ids: Set<Long>): List<MenuItem>
     @Insert suspend fun add(product: Product): Long
@@ -161,9 +175,9 @@ interface PosDao {
 }
 
 @Database(
-    entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class, CashierProfile::class,
-        StockCount::class, StockCountLine::class, SaleCharge::class],
-    version = 7
+    entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class,
+        CartItem::class, CashierProfile::class, StockCount::class, StockCountLine::class, SaleCharge::class, StoreSettings::class],
+    version = 8
 )
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
@@ -209,6 +223,15 @@ abstract class PosDatabase : RoomDatabase() {
             }
         }
 
+        private val addStoreSettings = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE StoreSettings (id INTEGER NOT NULL PRIMARY KEY, name TEXT NOT NULL, " +
+                        "address TEXT NOT NULL, logoName TEXT NOT NULL, qrisImage TEXT NOT NULL, extraCharges TEXT NOT NULL)"
+                )
+            }
+        }
+
         private val addSaleLineProductId = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE SaleLine ADD COLUMN productId INTEGER")
@@ -233,8 +256,25 @@ abstract class PosDatabase : RoomDatabase() {
             }
         }
 
-        fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles, addStockCounts, addVariantsDiscountsCharges)
+        internal inline fun <T> withBackupDatabase(context: Context, name: String, block: (PosDatabase) -> T): T {
+            val database = backupDatabase(context, name)
+            return try {
+                block(database)
+            } finally {
+                database.close()
+            }
+        }
+
+        private fun backupDatabase(context: Context, name: String): PosDatabase =
+            builder(context, name).setJournalMode(JournalMode.TRUNCATE).build()
+
+        private fun builder(context: Context, name: String) = Room.databaseBuilder(context, PosDatabase::class.java, name)
+            .addMigrations(
+                addCart, addIngredients, addSaleLineProductId, addCashierProfiles,
+                addStockCounts, addVariantsDiscountsCharges, addStoreSettings
+            )
+
+        fun open(context: Context): PosDatabase = builder(context, "kasir-rapi.db")
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     addOwnerCashier(db)
