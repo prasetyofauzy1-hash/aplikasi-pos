@@ -8,11 +8,22 @@ internal enum class ThermalPaper(val label: String, val columns: Int) {
 }
 
 private val combiningMarks = Regex("\\p{M}+")
+private val printerSymbols = Regex("[¼½¾⅐-⅞⁄‘’‚‛“”„‟‐‑‒–—―−…]")
 private val whitespace = Regex("[\\s\\p{Z}]+")
 private val nonPrintable = Regex("[^ -~]")
 
 private fun String.printerText() = Normalizer.normalize(this, Normalizer.Form.NFD)
-    .replace(combiningMarks, "").replace(whitespace, " ").trim().replace(nonPrintable, "?")
+    .replace(combiningMarks, "")
+    .replace(printerSymbols) { match ->
+        when (match.value[0]) {
+            '‘', '’', '‚', '‛' -> "'"
+            '“', '”', '„', '‟' -> "\""
+            '‐', '‑', '‒', '–', '—', '―', '−' -> "-"
+            '…' -> "..."
+            else -> Normalizer.normalize(match.value, Normalizer.Form.NFKD).replace('⁄', '/')
+        }
+    }
+    .replace(whitespace, " ").trim().replace(nonPrintable, "?")
 
 internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper): ByteArray = thermalDocument(paper) {
     val sale = receipt.sale

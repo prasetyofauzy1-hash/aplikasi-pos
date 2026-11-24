@@ -50,6 +50,16 @@ class ThermalReceiptTest {
         assertFalse(lines.any { it.startsWith("Tunai") || it.startsWith("Kembalian") || it.startsWith("TRX-") })
     }
 
+    @Test fun transliteratesCommonSymbolsBeforeReplacingUnsupportedCharacters() {
+        val styled = receipt.copy(
+            sale = receipt.sale.copy(storeName = "Toko ‘Café’"),
+            lines = listOf(receipt.lines[0].copy(productName = "½, ¼, ¾ — “Jus” ⅓ ☕"))
+        )
+        val lines = printedLines(styled, ThermalPaper.MM58)
+        assertTrue(lines.contains("Toko 'Cafe'"))
+        assertTrue(lines.contains("1/2, 1/4, 3/4 - \"Jus\" 1/3 ?"))
+    }
+
     @Test fun largeAmountsDoNotOverflowNarrowPaper() {
         val large = receipt.copy(lines = listOf(receipt.lines[0].copy(unitPrice = 999_999_999, quantity = 9_999)))
         val lines = printedLines(large, ThermalPaper.MM58)
