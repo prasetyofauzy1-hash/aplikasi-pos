@@ -292,9 +292,10 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
         }
         TotalBanner("Total yang harus dibayar", total)
         Text("Metode pembayaran", fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Payment.entries.forEach { value ->
-                FilterChip(selected = method == value, onClick = { method = value; model.clearError() }, label = { Text(value.label) })
+                FilterChip(selected = method == value, onClick = { method = value; model.clearError() },
+                    enabled = !model.busy, label = { Text(value.label) })
             }
         }
         if (method == Payment.CASH) {
@@ -313,18 +314,32 @@ internal fun PaymentScreen(products: List<Product>, cart: Map<Long, Int>, model:
                 cash != null && cash < total -> ErrorText("Uang tunai kurang ${rupiah(total - cash)}.")
                 cash != null -> MetricRow("Kembalian", rupiah(cash - total), true)
             }
-        } else {
+        } else if (method == Payment.QRIS) {
             EmptyPanel("QRIS dicatat manual", "Pastikan dana sudah diterima sebelum menyimpan. Aplikasi tidak memproses pembayaran QRIS.")
+        } else if (model.qrisAvailable) {
+            EmptyPanel("Pembayaran dikonfirmasi otomatis", "Tampilkan QRIS kepada pelanggan. Transaksi tersimpan setelah Midtrans mengonfirmasi pembayaran.")
+        } else {
+            EmptyPanel("QRIS Otomatis belum tersedia", "Gunakan Tunai atau QRIS manual.")
         }
         ErrorText(model.error)
         Button(
-            onClick = { model.sell(cart, total, method, cash, onPaid) },
-            enabled = cart.isNotEmpty() && !model.busy && (method == Payment.QRIS || (cash != null && cash >= total)),
+            onClick = {
+                focusManager.clearFocus()
+                if (method == Payment.QRIS_AUTO) model.startQris(cart, total)
+                else model.sell(cart, total, method, cash, onPaid)
+            },
+            enabled = cart.isNotEmpty() && !model.busy && when (method) {
+                Payment.CASH -> cash != null && cash >= total
+                Payment.QRIS -> true
+                Payment.QRIS_AUTO -> model.qrisAvailable && total > 0
+            },
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
         ) {
             Text(when {
+                model.busy && method == Payment.QRIS_AUTO -> "Menyiapkan…"
                 model.busy -> "Menyimpan…"
                 method == Payment.QRIS -> "Konfirmasi & simpan QRIS"
+                method == Payment.QRIS_AUTO -> "Buat kode QRIS"
                 else -> "Simpan transaksi"
             })
         }

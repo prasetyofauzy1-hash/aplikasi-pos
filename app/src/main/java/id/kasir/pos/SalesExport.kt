@@ -90,6 +90,7 @@ internal fun salesCsv(period: SalesExportPeriod, receipts: List<Receipt>): Strin
     row("Ringkasan", "Jumlah transaksi", "Total (Rp)")
     val byPayment = receipts.groupBy { it.sale.method }
     for (method in Payment.entries) {
+        if (method == Payment.QRIS_AUTO && method.label !in byPayment) continue
         val matching = byPayment[method.label].orEmpty()
         row(method.label, matching.size.toString(), matching.sumOf { it.sale.total }.toString())
     }

@@ -63,6 +63,15 @@ class SalesExportTest {
         assertEquals(listOf("Tunai;0;0;;", "QRIS;0;0;;", "Total keseluruhan;0;0;;"), summary)
     }
 
+    @Test fun automaticQrisAppearsInSummaryAndTransactionDetails() {
+        val period = salesExportPeriod(SalesGrouping.DAY, exportDate(2026, Calendar.MARCH, 9), jakarta)
+        val paid = receipt(1, period.start, 15_000, 15_000, Payment.QRIS_AUTO, "Jus")
+
+        val rows = salesCsv(period, listOf(paid)).split("\r\n")
+        assertEquals("QRIS Otomatis;1;15000;;", rows[5])
+        assertEquals("09/03/2026 00:00:00;TRX-00001;2 × Jus;QRIS Otomatis;15000", rows[9])
+    }
+
     private fun receipt(id: Long, time: Long, total: Long, paid: Long, method: Payment, product: String) =
         Receipt(Sale(id, time, total, paid, method.label, "Toko", "", ""),
             listOf(SaleLine(saleId = id, productName = product, unitPrice = total / 2, quantity = 2)))

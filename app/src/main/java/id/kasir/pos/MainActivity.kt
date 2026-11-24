@@ -104,6 +104,41 @@ private fun RegisterApp(model: RegisterModel) {
     var editingIngredient by rememberSaveable { mutableStateOf<Long?>(null) }
     val tabState = rememberSaveableStateHolder()
     val receipt = model.receipt
+    LaunchedEffect(model.busy, model.qrisReady) {
+        if (!model.busy && !model.qrisReady && model.error == null) model.loadQris()
+    }
+    LaunchedEffect(receipt) {
+        if (receipt?.sale?.method == Payment.QRIS_AUTO.label && tab == Tab.REGISTER) {
+            if (orderScreen == "payment" || orderScreen == "cart") {
+                cashierQuery = ""
+                orderScreen = ""
+            }
+        }
+    }
+    if (!model.qrisReady) {
+        Box(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp), contentAlignment = Alignment.Center) {
+            if (model.error == null) CircularProgressIndicator()
+            else Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ErrorText(model.error)
+                TextButton(onClick = model::loadQris) { Text("Coba lagi") }
+            }
+        }
+        return
+    }
+    val pending = model.pendingQris
+    if (pending != null) {
+        LaunchedEffect(pending.orderId) { tab = Tab.REGISTER }
+        PendingQrisScreen(pending, model)
+        return
+    }
+    val qrisEnded = model.qrisEnded
+    if (qrisEnded != null) {
+        QrisResultScreen(qrisEnded) {
+            model.closeQrisResult()
+            orderScreen = "cart"
+        }
+        return
+    }
     val closeSubScreen: () -> Unit = {
         if (!model.busy) {
             when {

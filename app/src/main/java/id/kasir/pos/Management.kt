@@ -308,7 +308,9 @@ internal fun HistoryScreen(model: RegisterModel) {
                 Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Payment.entries.forEach { method ->
-                            MetricRow(method.label, rupiah(report.totalsByPayment[method.label] ?: 0L))
+                            if (method != Payment.QRIS_AUTO || method.label in report.totalsByPayment) {
+                                MetricRow(method.label, rupiah(report.totalsByPayment[method.label] ?: 0L))
+                            }
                         }
                     }
                 }

@@ -11,8 +11,8 @@ val localProperties = Properties().apply {
     providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
         .asText.orNull?.reader()?.use { load(it) }
 }
-val firebaseApiKey = localProperties.getProperty("FIREBASE_API_KEY", "").trim()
-    .replace("\\", "\\\\").replace("\"", "\\\"")
+fun buildSetting(name: String) = (providers.environmentVariable(name).orNull
+    ?: localProperties.getProperty(name, "")).trim().replace("\\", "\\\\").replace("\"", "\\\"")
 
 android {
     namespace = "id.kasir.pos"
@@ -23,7 +23,10 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
-        buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "FIREBASE_API_KEY", "\"${buildSetting("FIREBASE_API_KEY")}\"")
+        buildConfigField("String", "QRIS_WORKER_URL", "\"${buildSetting("QRIS_WORKER_URL")}\"")
+        buildConfigField("String", "QRIS_APP_TOKEN", "\"${buildSetting("QRIS_APP_TOKEN")}\"")
     }
     buildFeatures {
         compose = true
@@ -53,4 +56,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

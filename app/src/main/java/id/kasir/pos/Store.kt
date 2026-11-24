@@ -39,6 +39,9 @@ data class Product(
 data class CartItem(@PrimaryKey val productId: Long, val quantity: Int)
 
 @Entity
+data class PendingQris(val orderId: String, val total: Long, @PrimaryKey val slot: Int = 0)
+
+@Entity
 data class Sale(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val time: Long,
@@ -79,6 +82,10 @@ interface PosDao {
     @Query("UPDATE CartItem SET quantity = MIN(quantity, :stock) WHERE productId = :id")
     suspend fun capCartQuantity(id: Long, stock: Int)
     @Query("DELETE FROM CartItem") suspend fun clearCart()
+    @Query("SELECT * FROM PendingQris WHERE slot = 0") suspend fun pendingQris(): PendingQris?
+    @Insert suspend fun addPendingQris(pending: PendingQris)
+    @Query("DELETE FROM PendingQris WHERE slot = 0 AND orderId = :orderId")
+    suspend fun consumePendingQris(orderId: String): Int
     @Query("UPDATE Product SET stock = stock - :quantity WHERE id = :id AND stock >= :quantity")
     suspend fun decrement(id: Long, quantity: Int): Int
     @Query("SELECT * FROM Ingredient ORDER BY name COLLATE NOCASE") fun ingredients(): Flow<List<Ingredient>>
@@ -107,11 +114,18 @@ interface PosDao {
     suspend fun receiptsForExport(start: Long, endExclusive: Long): List<Receipt>
 }
 
-@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class, CartItem::class], version = 4)
+@Database(entities = [Product::class, Ingredient::class, RecipeLine::class, Sale::class, SaleLine::class,
+    CartItem::class, PendingQris::class], version = 5)
 abstract class PosDatabase : RoomDatabase() {
     abstract fun dao(): PosDao
 
     companion object {
+        private val addPendingQris = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS PendingQris (orderId TEXT NOT NULL, total INTEGER NOT NULL, slot INTEGER NOT NULL PRIMARY KEY)")
+            }
+        }
+
         private val addSaleLineProductId = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE SaleLine ADD COLUMN productId INTEGER")
@@ -137,7 +151,7 @@ abstract class PosDatabase : RoomDatabase() {
         }
 
         fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
-            .addMigrations(addCart, addIngredients, addSaleLineProductId)
+            .addMigrations(addCart, addIngredients, addSaleLineProductId, addPendingQris)
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     listOf(
@@ -169,7 +183,7 @@ abstract class PosDatabase : RoomDatabase() {
 
 data class StoreProfile(val name: String = "Toko Saya", val address: String = "", val logoName: String = "")
 
-enum class Payment(val label: String) { CASH("Tunai"), QRIS("QRIS") }
+enum class Payment(val label: String) { CASH("Tunai"), QRIS("QRIS"), QRIS_AUTO("QRIS Otomatis") }
 
 class SaleInputException(message: String) : IllegalArgumentException(message)
 
@@ -186,7 +200,7 @@ fun calculateCheckout(products: List<Product>, cart: Map<Long, Int>, payment: Pa
         SaleLine(saleId = 0, productName = item.name, unitPrice = item.price, quantity = qty, productId = item.id)
     }
     val total = lines.sumOf { it.unitPrice * it.quantity }
-    val paid = if (payment == Payment.QRIS) total else cash ?: 0
+    val paid = if (payment == Payment.CASH) cash ?: 0 else total
     if (paid < total) throw SaleInputException("Uang tunai kurang dari total belanja.")
     return Checkout(lines, total, paid)
 }
@@ -196,31 +210,71 @@ class Register(private val db: PosDatabase) {
 
     suspend fun sell(cart: Map<Long, Int>, expectedTotal: Long, payment: Payment, cash: Long?, profile: StoreProfile): Receipt =
         db.withTransaction {
-            if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
-                throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
-            }
-            val menu = dao.menuById(cart.keys)
-            val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash)
-            if (order.total != expectedTotal) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
-            val ingredients = checkedIngredientDemand(menu, cart)
-            val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
-                method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName)
-            val id = dao.addSale(sale)
-            for (item in menu.filter { it.recipe.isEmpty() }) {
-                if (dao.decrement(item.product.id, cart.getValue(item.product.id)) != 1) {
-                    throw SaleInputException("Stok berubah. Periksa keranjang.")
-                }
-            }
-            for ((ingredientId, quantity) in ingredients) {
-                if (dao.decrementIngredient(ingredientId, quantity) != 1) {
-                    throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
-                }
-            }
-            val lines = order.lines.map { it.copy(saleId = id) }
-            dao.addLines(lines)
-            dao.clearCart()
-            Receipt(sale.copy(id = id), lines)
+            require(payment != Payment.QRIS_AUTO)
+            requireNoPendingQris()
+            verifyCart(cart)
+            recordSale(prepare(cart, expectedTotal, payment, cash), payment, profile)
         }
+
+    internal suspend fun beginQris(orderId: String, cart: Map<Long, Int>, total: Long): PendingQris =
+        db.withTransaction {
+            requireNoPendingQris()
+            verifyCart(cart)
+            val prepared = prepare(cart, total, Payment.QRIS_AUTO, null)
+            if (prepared.order.total <= 0) throw SaleInputException("Total QRIS harus lebih dari Rp0.")
+            PendingQris(orderId, prepared.order.total).also { dao.addPendingQris(it) }
+        }
+
+    internal suspend fun finishQris(order: QrisOrder, profile: StoreProfile): Receipt? = db.withTransaction {
+        val pending = dao.pendingQris() ?: return@withTransaction null
+        val resolution = pending.resolution(order)
+        if (resolution == QrisResolution.WAIT) return@withTransaction null
+        if (dao.consumePendingQris(pending.orderId) != 1) return@withTransaction null
+        if (resolution != QrisResolution.SAVE) return@withTransaction null
+        val cart = dao.cartSnapshot().associate { it.productId to it.quantity }
+        recordSale(prepare(cart, pending.total, Payment.QRIS_AUTO, null), Payment.QRIS_AUTO, profile)
+    }
+
+    internal suspend fun requireNoPendingQris() {
+        if (dao.pendingQris() != null) throw SaleInputException("Selesaikan pembayaran QRIS yang sedang berjalan.")
+    }
+
+    private suspend fun verifyCart(cart: Map<Long, Int>) {
+        if (dao.cartSnapshot().associate { it.productId to it.quantity } != cart) {
+            throw SaleInputException("Keranjang berubah. Periksa kembali pesanan.")
+        }
+    }
+
+    private data class PreparedSale(val order: Checkout, val products: Map<Long, Int>, val ingredients: Map<Long, Int>)
+
+    private suspend fun prepare(cart: Map<Long, Int>, total: Long, payment: Payment, cash: Long?): PreparedSale {
+        val menu = dao.menuById(cart.keys)
+        val order = calculateCheckout(availableCatalog(menu, emptyMap()), cart, payment, cash)
+        if (order.total != total) throw SaleInputException("Total berubah. Periksa kembali pesanan.")
+        return PreparedSale(order, menu.filter { it.recipe.isEmpty() }
+            .associate { it.product.id to cart.getValue(it.product.id) }, checkedIngredientDemand(menu, cart))
+    }
+
+    private suspend fun recordSale(prepared: PreparedSale, payment: Payment, profile: StoreProfile): Receipt {
+        val (order, products, ingredients) = prepared
+        val sale = Sale(time = System.currentTimeMillis(), total = order.total, paid = order.paid,
+            method = payment.label, storeName = profile.name, storeAddress = profile.address, logoName = profile.logoName)
+        val id = dao.addSale(sale)
+        for ((productId, quantity) in products) {
+            if (dao.decrement(productId, quantity) != 1) {
+                throw SaleInputException("Stok berubah. Periksa keranjang.")
+            }
+        }
+        for ((ingredientId, quantity) in ingredients) {
+            if (dao.decrementIngredient(ingredientId, quantity) != 1) {
+                throw SaleInputException("Stok bahan berubah. Periksa keranjang.")
+            }
+        }
+        val lines = order.lines.map { it.copy(saleId = id) }
+        dao.addLines(lines)
+        dao.clearCart()
+        return Receipt(sale.copy(id = id), lines)
+    }
 }
 
 val indonesia = Locale("id", "ID")

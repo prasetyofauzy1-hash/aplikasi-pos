@@ -1,13 +1,14 @@
 # Kasir Rapi
 
-Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat, tanpa memerlukan koneksi internet.
+Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat. Tunai dan QRIS manual dapat digunakan tanpa koneksi internet.
 
 - Buat PIN pemilik enam angka saat pertama membuka aplikasi, lalu atur profil toko. PIN juga diminta pada peluncuran baru; gunakan **Toko → Kunci aplikasi** untuk mengunci secara manual.
 - Atur nama, alamat opsional, dan logo melalui **Toko**. Logo yang dipilih dapat diperiksa sebelum disimpan. Identitas toko disalin ke setiap struk saat transaksi disimpan.
 - Jika email pemilik sudah dihubungkan, **Lupa PIN?** memungkinkan Anda masuk dengan akun itu dan membuat PIN baru tanpa menghapus data toko. Menghubungkan email dan memulihkan PIN memerlukan internet; penggunaan PIN dan kasir tetap bisa offline.
 - Masukkan jumlah bahan di **Produk → Stok bahan**. Gunakan gram, mililiter, atau buah sesuai bahan. Menu dan resep contoh tersedia pada pemasangan pertama, tetapi stok awal bahan adalah nol.
 - Gunakan **Produk** untuk menambah, mengubah, atau menghapus menu, harga, kategori, dan resep per porsi. Misalnya, satu Berry Go memakai 200 g berry dan 200 g pisang.
-- Pilih menu di **Kasir**, periksa keranjang, lalu catat pembayaran **Tunai** atau **QRIS**. QRIS hanya dicatat setelah Anda memeriksa pembayaran di luar aplikasi. Menu hanya bisa dijual jika bahannya cukup, termasuk ketika beberapa menu memakai bahan yang sama. Stok bahan berkurang setelah transaksi berhasil disimpan.
+- Pilih menu di **Kasir**, periksa keranjang, lalu pilih **Tunai**, **QRIS** manual, atau **QRIS Otomatis**. Untuk QRIS manual, periksa pembayaran di luar aplikasi sebelum menyimpan. QRIS Otomatis memerlukan internet dan menampilkan kode untuk total pesanan. Struk dan pengurangan stok hanya disimpan setelah Midtrans mengonfirmasi pembayaran.
+- Jika koneksi terputus atau aplikasi ditutup saat menunggu QRIS Otomatis, buka kembali aplikasi dan masukkan PIN untuk melanjutkan pengecekan. Transaksi yang kedaluwarsa atau dibatalkan tidak disimpan, dan pesanan tetap ada di keranjang.
 - Buka **Riwayat** dan pilih tanggal untuk melihat total penjualan, rincian Tunai dan QRIS, serta struk hari itu. Pilih **Produk terjual** untuk mencocokkan jumlah dan omzet per produk dengan catatan manual. **Bagikan struk** membuka menu berbagi Android; pilih WhatsApp jika terpasang. Struk yang dibagikan berupa teks.
 
 ## Pengembangan
@@ -28,3 +29,7 @@ APK debug bisa dipasang di Android 7.0 (API 24) atau lebih baru. Pembaruan mempe
 3. Salin **Web API Key** dari **Project settings → General**, tambah `FIREBASE_API_KEY=...` ke `local.properties` di akar repo, lalu build ulang. Gunakan proyek Firebase yang sama untuk pembaruan aplikasi.
 
 Tanpa pengaturan ini, opsi menghubungkan email tidak muncul dan aplikasi tetap bisa digunakan sepenuhnya offline. Pemulihan PIN tanpa akun yang sudah dihubungkan tidak tersedia. Firebase menangani autentikasi saja; profil toko, stok, dan transaksi tetap lokal. Data hilang jika aplikasi dihapus atau datanya dibersihkan. Tidak ada sinkronisasi cloud, dukungan banyak kasir, atau koneksi printer.
+
+### QRIS Otomatis (opsional)
+
+Ikuti [panduan Worker Midtrans](backend/qris-worker/README.md) untuk menyiapkan backend dan APK sandbox. Jika belum dikonfigurasi, Tunai dan QRIS manual tetap tersedia.

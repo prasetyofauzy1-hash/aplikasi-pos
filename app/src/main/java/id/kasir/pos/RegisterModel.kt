@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -35,6 +36,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private val dao = database.dao()
     private val register = Register(database)
     private val ownerAuth = BuildConfig.FIREBASE_API_KEY.takeIf { it.isNotBlank() }?.let { OwnerAuth(it) }
+    private val qrisClient = QrisClient.configured()
 
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -67,6 +69,19 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     var busy by mutableStateOf(false)
         private set
     var error by mutableStateOf<String?>(null)
+        private set
+    val qrisAvailable get() = qrisClient != null
+    var qrisReady by mutableStateOf(false)
+        private set
+    var pendingQris by mutableStateOf<PendingQris?>(null)
+        private set
+    internal var qrisOrder by mutableStateOf<QrisOrder?>(null)
+        private set
+    var qrisImage by mutableStateOf<Bitmap?>(null)
+        private set
+    var qrisIssue by mutableStateOf<String?>(null)
+        private set
+    internal var qrisEnded by mutableStateOf<QrisStatus?>(null)
         private set
 
     fun clearError() { error = null }
@@ -258,6 +273,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 database.withTransaction {
+                    register.requireNoPendingQris()
                     val previous = dao.cartSnapshot().associate { it.productId to it.quantity }
                     val old = previous[product.id]
                     val next = quantity(old ?: 0)
@@ -282,6 +298,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun saveProduct(product: Product, recipe: Map<Long, Int>, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
         database.withTransaction {
+            register.requireNoPendingQris()
             if (recipe.isEmpty() && (product.id == 0L || dao.menuById(setOf(product.id)).any { it.recipe.isNotEmpty() })) {
                 throw SaleInputException("Tambahkan setidaknya satu bahan ke resep.")
             }
@@ -306,6 +323,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun saveIngredient(ingredient: Ingredient, onDone: () -> Unit) = runAction("Bahan tidak dapat disimpan.") {
         database.withTransaction {
+            register.requireNoPendingQris()
             if (dao.ingredientNameExists(ingredient.name, ingredient.id)) {
                 throw SaleInputException("Nama bahan sudah dipakai.")
             }
@@ -317,6 +335,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteIngredient(id: Long, onDone: () -> Unit) = runAction("Bahan tidak dapat dihapus.") {
         database.withTransaction {
+            register.requireNoPendingQris()
             if (dao.ingredientInUse(id)) throw SaleInputException("Bahan masih dipakai dalam resep.")
             dao.deleteIngredient(id)
         }
@@ -331,7 +350,10 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat dihapus.") {
-        dao.delete(product.id)
+        database.withTransaction {
+            register.requireNoPendingQris()
+            dao.delete(product.id)
+        }
         onDone()
     }
 
@@ -340,6 +362,74 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             receipt = register.sell(cart, total, payment, cash, profile)
             onDone()
         }
+
+    fun loadQris() {
+        if (qrisReady) return
+        runAction("Pembayaran sebelumnya tidak dapat diperiksa.") {
+            pendingQris = dao.pendingQris()
+            qrisReady = true
+        }
+    }
+
+    fun startQris(cart: Map<Long, Int>, total: Long) = runAction("Pesanan QRIS tidak dapat dibuat.") {
+        check(qrisAvailable)
+        val pending = register.beginQris("jusgo-${UUID.randomUUID()}", cart, total)
+        qrisOrder = null
+        qrisImage = null
+        qrisIssue = null
+        pendingQris = pending
+    }
+
+    internal suspend fun checkQris(pending: PendingQris) {
+        val client = qrisClient
+        if (client == null) {
+            qrisIssue = "QRIS Otomatis belum dikonfigurasi di aplikasi ini."
+            return
+        }
+
+        val order = try {
+            if (qrisOrder?.qrUrl == null) client.create(pending) else client.status(pending)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            qrisIssue = "Tidak dapat terhubung. Status akan diperiksa lagi secara otomatis."
+            return
+        }
+
+        if (order.status != QrisStatus.PENDING) {
+            try {
+                withContext(NonCancellable) {
+                    val saved = register.finishQris(order, profile)
+                    if (order.status == QrisStatus.PAID && saved == null) error("Struk QRIS tidak tersedia")
+                    receipt = saved
+                    qrisEnded = if (saved == null) order.status else null
+                    pendingQris = null
+                    qrisImage = null
+                    qrisOrder = null
+                    qrisIssue = null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                qrisIssue = "Status diterima, tetapi belum dapat disimpan. Aplikasi akan mencoba lagi."
+            }
+            return
+        }
+
+        qrisIssue = null
+        qrisOrder = order
+        if (qrisImage == null && order.qrUrl != null && System.currentTimeMillis() < order.expiresAt) {
+            try {
+                qrisImage = client.image(order.qrUrl)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                qrisIssue = "Kode QR belum dapat dimuat. Aplikasi akan mencoba lagi."
+            }
+        }
+    }
+
+    fun closeQrisResult() { qrisEnded = null }
 
     fun openReceipt(id: Long) = runAction("Struk tidak dapat dibuka.") {
         receipt = dao.receipt(id) ?: throw SaleInputException("Struk tidak ditemukan.")
