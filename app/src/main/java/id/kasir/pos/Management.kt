@@ -196,7 +196,7 @@ internal fun HistoryScreen(sales: List<Sale>, model: RegisterModel) {
 }
 
 @Composable
-internal fun ReceiptScreen(receipt: Receipt, onDone: () -> Unit) {
+internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -> Unit) {
     val sale = receipt.sale
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
@@ -225,7 +225,12 @@ internal fun ReceiptScreen(receipt: Receipt, onDone: () -> Unit) {
             }
         }
         ShareReceiptButton(receipt)
-        OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Selesai") }
+        EmailReceiptButton(receipt)
+        if (fromCheckout) {
+            TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Transaksi baru") }
+        } else {
+            OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Selesai") }
+        }
     }
 }
 

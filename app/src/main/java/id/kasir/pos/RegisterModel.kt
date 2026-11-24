@@ -134,10 +134,11 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun adjust(product: Product, delta: Int) {
-        val old = cart[product.id] ?: 0
-        val next = old + delta
-        if (delta > 0 && next > product.stock) return
-        cart = if (next <= 0) cart - product.id else cart + (product.id to next)
+        setQuantity(product, ((cart[product.id] ?: 0) + delta).coerceAtLeast(0))
+    }
+
+    fun setQuantity(product: Product, quantity: Int) {
+        if (!busy) cart = updateCartQuantity(cart, product, quantity)
     }
 
     fun saveProduct(product: Product, onDone: () -> Unit) = runAction("Produk tidak dapat disimpan.") {
