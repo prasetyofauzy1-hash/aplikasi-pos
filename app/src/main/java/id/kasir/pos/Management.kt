@@ -554,6 +554,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
                 Text(if (email == null) "Hubungkan email pemilik" else "Kelola email pemilik")
             }
         }
+        CloudBackupSettings(model)
         OutlinedButton(onClick = model::lock, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Kunci aplikasi") }
         Spacer(Modifier.height(8.dp))
     }

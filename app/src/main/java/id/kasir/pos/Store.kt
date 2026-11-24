@@ -233,8 +233,13 @@ abstract class PosDatabase : RoomDatabase() {
             }
         }
 
-        fun open(context: Context): PosDatabase = Room.databaseBuilder(context, PosDatabase::class.java, "kasir-rapi.db")
+        internal fun backupDatabase(context: Context, name: String): PosDatabase =
+            builder(context, name).setJournalMode(JournalMode.TRUNCATE).build()
+
+        private fun builder(context: Context, name: String) = Room.databaseBuilder(context, PosDatabase::class.java, name)
             .addMigrations(addCart, addIngredients, addSaleLineProductId, addCashierProfiles, addStockCounts, addVariantsDiscountsCharges)
+
+        fun open(context: Context): PosDatabase = builder(context, "kasir-rapi.db")
             .addCallback(object : Callback() {
                 override fun onCreate(db: SupportSQLiteDatabase) {
                     addOwnerCashier(db)

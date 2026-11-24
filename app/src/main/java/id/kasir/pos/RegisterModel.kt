@@ -34,6 +34,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     private val dao = database.dao()
     private val register = Register(database)
     private val ownerAuth = BuildConfig.FIREBASE_API_KEY.takeIf { it.isNotBlank() }?.let { OwnerAuth(it) }
+    private val cloudBackup = BuildConfig.FIREBASE_BACKUP_URL.takeIf {
+        ownerAuth != null && it.matches(Regex("https://[a-z0-9.-]+\\.(firebaseio\\.com|firebasedatabase\\.app)/?"))
+    }?.let(::FirebaseBackup)
 
     val menu = dao.menu().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
     val ingredients = dao.ingredients().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -56,6 +59,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     var resettingPin by mutableStateOf(false)
         private set
     val emailAvailable get() = ownerAuth != null
+    internal val cloudBackupAvailable get() = cloudBackup != null
     var profile by mutableStateOf(StoreProfile(
         preferences.getString("name", null) ?: "Toko Saya",
         preferences.getString("address", null).orEmpty(),
@@ -209,6 +213,61 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             if (activeCashierId == id) setActiveCashier(OWNER_CASHIER_ID)
             onDone()
         }
+    }
+
+    internal fun runCloudBackup(
+        restore: Boolean, pin: String, email: String, password: String, onDone: () -> Unit
+    ) {
+        val auth = ownerAuth ?: return
+        val cloud = cloudBackup ?: return
+        if (!unlocked || linkedOwnerEmail == null) return
+        val current = BackupProfile(profile, qrisImageName)
+        val fallback = if (restore) "Cadangan tidak dapat dipulihkan. Periksa koneksi atau coba lagi."
+            else "Cadangan tidak dapat dibuat. Periksa koneksi atau coba lagi."
+        runAction(fallback) {
+            val restored = withContext(Dispatchers.IO) {
+                requireOwnerPin(pin)
+                val session = auth.session(requireRecoveryEmail(email), password)
+                if (!session.account.matches(preferences.getString("ownerUid", null))) {
+                    throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
+                }
+                val context = getApplication<Application>()
+                val archive = BackupArchive(context, database)
+                val file = File.createTempFile("cloud-backup-", ".zip", context.cacheDir)
+                try {
+                    if (restore) {
+                        cloud.download(session, file)
+                        var changed = false
+                        try {
+                            archive.restore(file) {
+                                changed = true
+                                saveBackupProfile(it)
+                            }
+                        } catch (e: Exception) {
+                            if (changed) saveBackupProfile(current)
+                            throw e
+                        }
+                    } else {
+                        archive.create(file, current)
+                        cloud.upload(session, file)
+                        null
+                    }
+                } finally {
+                    file.delete()
+                }
+            }
+            if (restored != null) {
+                profile = restored.store
+                qrisImageName = restored.qris
+                receipt = null
+            }
+            onDone()
+        }
+    }
+
+    private fun saveBackupProfile(state: BackupProfile) {
+        if (!preferences.edit().putString("name", state.store.name).putString("address", state.store.address)
+                .putString("logo", state.store.logoName).putString("qrisImage", state.qris).commit()) throw IOException()
     }
 
     fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
@@ -542,6 +601,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             } catch (e: SaleInputException) {
                 error = e.message
             } catch (e: OwnerAuthException) {
+                error = e.message
+            } catch (e: BackupException) {
                 error = e.message
             } catch (_: Exception) {
                 error = fallback

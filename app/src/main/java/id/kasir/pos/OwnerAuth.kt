@@ -7,6 +7,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 internal data class OwnerAccount(val uid: String, val email: String)
+internal class OwnerSession(val account: OwnerAccount, val idToken: String)
 
 internal class OwnerAuth(
     key: String,
@@ -14,13 +15,17 @@ internal class OwnerAuth(
 ) {
     private val apiKey = URLEncoder.encode(key, "UTF-8")
 
-    fun authenticate(email: String, password: String, createAccount: Boolean): OwnerAccount {
+    fun authenticate(email: String, password: String, createAccount: Boolean): OwnerAccount =
+        session(email, password, createAccount).account
+
+    fun session(email: String, password: String, createAccount: Boolean = false): OwnerSession {
         val result = post(if (createAccount) "signUp" else "signInWithPassword",
             JSONObject().put("email", email).put("password", password).put("returnSecureToken", true))
         val uid = result.getString("localId")
         val accountEmail = result.getString("email")
-        if (uid.isBlank() || accountEmail.isBlank()) throw IOException()
-        return OwnerAccount(uid, accountEmail)
+        val token = result.getString("idToken")
+        if (uid.isBlank() || accountEmail.isBlank() || token.isBlank()) throw IOException()
+        return OwnerSession(OwnerAccount(uid, accountEmail), token)
     }
 
     fun sendPasswordReset(email: String) {

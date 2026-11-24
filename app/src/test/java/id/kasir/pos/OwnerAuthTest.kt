@@ -61,6 +61,16 @@ class OwnerAuthTest {
         }
     }
 
+    @Test fun cloudSessionIncludesTheFirebaseIdTokenForTheAuthenticatedAccount() {
+        withServer { auth, server ->
+            server.enqueue(MockResponse().setBody("""{"localId":"owner-123","email":"owner@example.com","idToken":"signed-token"}"""))
+            val session = auth.session("owner@example.com", "test-password")
+            assertEquals(OwnerAccount("owner-123", "owner@example.com"), session.account)
+            assertEquals("signed-token", session.idToken)
+            assertEquals("/v1/accounts:signInWithPassword?key=test-key", server.next().path)
+        }
+    }
+
     @Test fun rejectsInvalidCredentialsWithAnIndonesianMessage() {
         withServer { auth, server ->
             server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":{"message":"INVALID_LOGIN_CREDENTIALS"}}"""))

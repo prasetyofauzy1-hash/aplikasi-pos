@@ -47,7 +47,7 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
                 if (unlinking) {
                     Text("Email ini tidak akan bisa digunakan untuk memulihkan PIN perangkat ini. Data toko tetap tersimpan.")
                 } else {
-                    Text("Gunakan akun email untuk membuat PIN baru jika lupa. Ini opsional dan perlu internet. Data toko tetap di perangkat ini.")
+                    Text("Gunakan akun email untuk membuat PIN baru jika lupa atau memakai backup cloud jika tersedia. Ini opsional dan perlu internet.")
                     OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
                     OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
                     if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
@@ -91,7 +91,7 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun OwnerEmailField(value: String, label: String, enabled: Boolean, onChange: (String) -> Unit) {
+internal fun OwnerEmailField(value: String, label: String, enabled: Boolean, onChange: (String) -> Unit) {
     OutlinedTextField(value, onChange, Modifier.fillMaxWidth(),
         label = { Text(label) }, enabled = enabled, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
@@ -156,7 +156,7 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
 }
 
 @Composable
-private fun OwnerPasswordField(value: String, enabled: Boolean, newAccount: Boolean = false, onChange: (String) -> Unit) {
+internal fun OwnerPasswordField(value: String, enabled: Boolean, newAccount: Boolean = false, onChange: (String) -> Unit) {
     OutlinedTextField(value, onChange, Modifier.fillMaxWidth(),
         label = { Text("Kata sandi") }, enabled = enabled, singleLine = true,
         supportingText = if (newAccount) ({ Text("Minimal 6 karakter") }) else null,
