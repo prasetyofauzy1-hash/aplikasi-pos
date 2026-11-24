@@ -106,9 +106,16 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
             onDismissRequest = dismiss,
             title = { Text("Lupa PIN?") },
             text = {
-                Text("PIN tidak dapat dipulihkan tanpa email pemilik yang terhubung. Jika PIN benar-benar lupa, " +
-                    "Anda hanya dapat memulai ulang dengan menghapus data aplikasi di pengaturan Android. " +
-                    "Tindakan itu menghapus semua data toko di perangkat ini, termasuk produk dan riwayat transaksi.")
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (email != null) {
+                        Text("Email pemilik sudah terhubung, tetapi versi ini tidak mendukung login email. " +
+                            "Perbarui ke versi Kasir Rapi dengan login email aktif tanpa menghapus aplikasi. Data toko tetap tersimpan.")
+                    } else {
+                        Text("Tidak ada email pemilik yang terhubung, sehingga PIN tidak dapat dipulihkan.")
+                    }
+                    Text("Sebagai pilihan terakhir saja, hapus data aplikasi di pengaturan Android untuk memulai dari awal. " +
+                        "Ini menghapus semua data toko, termasuk produk dan riwayat transaksi.")
+                }
             },
             confirmButton = { TextButton(onClick = dismiss) { Text("Mengerti") } }
         )
