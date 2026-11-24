@@ -10,9 +10,11 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
@@ -21,16 +23,26 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 @Composable
-internal fun CashierScreen(products: List<Product>, model: RegisterModel, onCart: () -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
+internal fun CashierScreen(
+    products: List<Product>, model: RegisterModel, query: String, onQueryChange: (String) -> Unit, onCart: () -> Unit
+) {
+    val focusManager = LocalFocusManager.current
     val results = products.filter { it.name.contains(query.trim(), true) || it.category.contains(query.trim(), true) }
     val count = model.cart.values.sum()
     val total = cartTotal(products, model.cart)
@@ -51,9 +63,14 @@ internal fun CashierScreen(products: List<Product>, model: RegisterModel, onCart
                             Text("Pilih barang untuk memulai transaksi.", color = Color(0xFFD4E8DF), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
-                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true,
+                    OutlinedTextField(query, onQueryChange, Modifier.fillMaxWidth(), singleLine = true,
                         placeholder = { Text("Cari nama atau kategori") },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = if (query.isEmpty()) null else {
+                            { IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Close, "Hapus pencarian") } }
+                        },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                         shape = Shape, colors = OutlinedTextFieldDefaults.colors(
                             unfocusedBorderColor = Line, unfocusedContainerColor = Color.White, focusedContainerColor = Color.White))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -132,6 +149,7 @@ internal fun cartTotal(products: List<Product>, cart: Map<Long, Int>) =
 
 @Composable
 internal fun CartScreen(products: List<Product>, model: RegisterModel, onPay: () -> Unit) {
+    var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val listed = products.filter { it.id in model.cart }
     val count = model.cart.values.sum()
     Column(Modifier.fillMaxSize()) {
@@ -147,8 +165,15 @@ internal fun CartScreen(products: List<Product>, model: RegisterModel, onPay: ()
                             Text(product.name, fontWeight = FontWeight.Bold)
                             Text("${rupiah(product.price)} per barang", color = Muted, style = MaterialTheme.typography.bodySmall)
                         }
-                        IconButton(onClick = { model.adjust(product, -1) }) { Text("−", fontSize = 22.sp) }
-                        Text("$qty", fontWeight = FontWeight.Bold)
+                        IconButton(onClick = { model.adjust(product, -1) }) {
+                            Text("−", Modifier.semantics { contentDescription = "Kurangi ${product.name}" }, fontSize = 22.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { editingId = product.id },
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier.defaultMinSize(minWidth = 48.dp)
+                                .semantics { contentDescription = "Ubah jumlah ${product.name}" }
+                        ) { Text("$qty", fontWeight = FontWeight.Bold) }
                         IconButton(onClick = { model.adjust(product, 1) }, enabled = qty < product.stock) {
                             Icon(Icons.Default.Add, "Tambah ${product.name}")
                         }
@@ -163,14 +188,64 @@ internal fun CartScreen(products: List<Product>, model: RegisterModel, onPay: ()
             }
         }
     }
+    listed.firstOrNull { it.id == editingId }?.let { product ->
+        QuantityDialog(product, model.cart.getValue(product.id), onDismiss = { editingId = null }) { quantity ->
+            model.setQuantity(product, quantity)
+            editingId = null
+        }
+    }
 }
 
 @Composable
+private fun QuantityDialog(product: Product, quantity: Int, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    var input by rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        val initial = quantity.toString()
+        mutableStateOf(TextFieldValue(initial, TextRange(0, initial.length)))
+    }
+    val entered = input.text.toIntOrNull()
+    val valid = entered != null && entered in 1..product.stock
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Ubah jumlah") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(product.name, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { if (it.text.length <= Int.MAX_VALUE.toString().length && it.text.all { c -> c in '0'..'9' }) input = it },
+                    modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                    label = { Text("Jumlah barang") },
+                    supportingText = { Text("Stok tersedia: ${product.stock}") },
+                    isError = input.text.isNotEmpty() && !valid,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { if (valid) onSet(checkNotNull(entered)) })
+                )
+                TextButton(onClick = { onSet(0) }) { Text("Hapus barang") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSet(checkNotNull(entered)) }, enabled = valid) { Text("Terapkan") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } }
+    )
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+}
+
+@Composable
+@OptIn(ExperimentalLayoutApi::class)
 internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid: () -> Unit) {
     var method by rememberSaveable { mutableStateOf(Payment.CASH) }
     var amount by rememberSaveable { mutableStateOf("") }
     val total = cartTotal(products, model.cart)
     val cash = parseRupiah(amount, maxDigits = 18)
+    val focusManager = LocalFocusManager.current
+    val setCash: (Long) -> Unit = {
+        amount = it.toString()
+        model.clearError()
+        focusManager.clearFocus()
+    }
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -188,10 +263,17 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
                 modifier = Modifier.fillMaxWidth(), label = { Text("Uang diterima") },
                 prefix = { if (!amount.trimStart().startsWith("Rp", ignoreCase = true)) Text("Rp ") },
                 singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-            OutlinedButton(onClick = { amount = total.toString(); model.clearError() }) { Text("Isi uang pas") }
-            MetricRow("Kembalian", rupiah(((cash ?: 0) - total).coerceAtLeast(0)), true)
-            if (amount.isNotBlank() && cash == null) ErrorText("Gunakan format Rupiah, misalnya Rp19.000,00.")
-            if (cash != null && cash < total) ErrorText("Uang tunai kurang ${rupiah(total - cash)}.")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { setCash(total) }) { Text("Uang pas") }
+                quickCashAmounts(total).forEach { value ->
+                    OutlinedButton(onClick = { setCash(value) }) { Text(rupiah(value)) }
+                }
+            }
+            when {
+                amount.isNotBlank() && cash == null -> ErrorText("Gunakan format Rupiah, misalnya Rp19.000,00.")
+                cash != null && cash < total -> ErrorText("Uang tunai kurang ${rupiah(total - cash)}.")
+                cash != null -> MetricRow("Kembalian", rupiah(cash - total), true)
+            }
         } else {
             EmptyPanel("QRIS dicatat manual", "Pastikan dana sudah diterima sebelum menyimpan. Aplikasi tidak memproses pembayaran QRIS.")
         }
@@ -200,7 +282,13 @@ internal fun PaymentScreen(products: List<Product>, model: RegisterModel, onPaid
             onClick = { model.sell(total, method, cash, onPaid) },
             enabled = model.cart.isNotEmpty() && !model.busy && (method == Payment.QRIS || (cash != null && cash >= total)),
             modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp)
-        ) { Text(if (model.busy) "Menyimpan…" else "Simpan transaksi") }
+        ) {
+            Text(when {
+                model.busy -> "Menyimpan…"
+                method == Payment.QRIS -> "Konfirmasi & simpan QRIS"
+                else -> "Simpan transaksi"
+            })
+        }
     }
 }
 

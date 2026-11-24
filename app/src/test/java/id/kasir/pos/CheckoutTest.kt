@@ -18,6 +18,21 @@ class CheckoutTest {
         assertEquals(listOf(15_000L, 6_000L), order.lines.map { it.unitPrice })
     }
 
+    @Test fun cartQuantityCanBeReplacedOrRemovedWithoutExceedingStock() {
+        val cart = mapOf(1L to 1, 2L to 1)
+        assertEquals(mapOf(1L to 6, 2L to 1), updateCartQuantity(cart, coffee, 6))
+        assertEquals(cart, updateCartQuantity(cart, coffee, 7))
+        assertEquals(cart, updateCartQuantity(cart, coffee, -1))
+        assertEquals(mapOf(2L to 1), updateCartQuantity(cart, coffee, 0))
+    }
+
+    @Test fun cashShortcutsOnlyOfferNotesAboveTheOrderTotal() {
+        assertEquals(listOf(20_000L, 50_000L), quickCashAmounts(15_000L))
+        assertEquals(listOf(50_000L, 100_000L), quickCashAmounts(49_000L))
+        assertEquals(listOf(100_000L), quickCashAmounts(50_000L))
+        assertTrue(quickCashAmounts(100_000L).isEmpty())
+    }
+
     @Test fun rejectsEmptyCartDeletedProductInsufficientStockAndCash() {
         assertThrows(SaleInputException::class.java) { calculateCheckout(listOf(coffee), emptyMap(), Payment.CASH, 15_000) }
         assertThrows(SaleInputException::class.java) { calculateCheckout(emptyList(), mapOf(1L to 1), Payment.QRIS, null) }

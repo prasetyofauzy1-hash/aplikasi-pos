@@ -324,13 +324,13 @@ internal fun HistoryScreen(model: RegisterModel) {
 }
 
 @Composable
-internal fun ReceiptScreen(receipt: Receipt, onDone: () -> Unit, fromHistory: Boolean) {
+internal fun ReceiptScreen(receipt: Receipt, fromCheckout: Boolean, onDone: () -> Unit) {
     val sale = receipt.sale
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        EmptyPanel(if (fromHistory) "Struk tersimpan" else "✓  Transaksi tersimpan", "${ticket(sale.id)}  •  ${sale.method}")
+        EmptyPanel(if (fromCheckout) "✓  Transaksi tersimpan" else "Struk tersimpan", "${ticket(sale.id)}  •  ${sale.method}")
         Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
             Column(Modifier.fillMaxWidth().padding(19.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
@@ -353,8 +353,11 @@ internal fun ReceiptScreen(receipt: Receipt, onDone: () -> Unit, fromHistory: Bo
             }
         }
         ShareReceiptButton(receipt)
-        OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            Text(if (fromHistory) "Kembali ke riwayat" else "Selesai")
+        EmailReceiptButton(receipt)
+        if (fromCheckout) {
+            TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Transaksi baru") }
+        } else {
+            OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Kembali ke riwayat") }
         }
     }
 }
