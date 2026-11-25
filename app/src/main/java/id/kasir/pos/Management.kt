@@ -601,6 +601,9 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         HorizontalDivider(color = Line)
         EmptyPanel("Akses pemilik", "Satu PIN untuk mengunci akses kasir di perangkat ini.")
         val email = model.linkedOwnerEmail
+        if (email == null) {
+            Text("Mode tamu · Data hanya disimpan di perangkat ini", color = Muted, style = MaterialTheme.typography.bodyMedium)
+        }
         if (model.emailAvailable || email != null) {
             if (email != null) {
                 Text("Email pemilik terhubung: ${maskedOwnerEmail(email)}", color = Muted, style = MaterialTheme.typography.bodyMedium)

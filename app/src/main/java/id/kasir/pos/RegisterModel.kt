@@ -64,9 +64,12 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var linkedOwnerEmail by mutableStateOf(preferences.getString("ownerEmail", null))
         private set
+    internal var isGoogleOwner by mutableStateOf(preferences.getBoolean("ownerGoogle", false))
+        private set
     var resettingPin by mutableStateOf(false)
         private set
     val emailAvailable get() = ownerAuth != null
+    internal val googleOwnerAvailable get() = emailAvailable && BuildConfig.GOOGLE_WEB_CLIENT_ID.isNotBlank()
     internal val cloudBackupAvailable get() = cloudBackup != null
     private val legacyShop = BackupProfile(
         StoreProfile(
@@ -163,21 +166,33 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     fun linkOwnerEmail(
         pin: String, email: String, confirmation: String, password: String, createAccount: Boolean, onDone: () -> Unit
     ) {
-        val auth = ownerAuth ?: return
-        if (!unlocked || busy) return
+        if (!emailAvailable || !unlocked || busy) return
         if (!ownerEmailsMatch(email, confirmation)) {
             error = "Konfirmasi email tidak sama."
             return
         }
+        linkOwner(pin, OwnerCredential.Password(email.trim(), password), createAccount, onDone)
+    }
+
+    internal fun linkGoogleOwner(pin: String, credential: OwnerCredential.Google, onDone: () -> Unit) {
+        if (!googleOwnerAvailable) return
+        linkOwner(pin, credential, createAccount = true, onDone)
+    }
+
+    private fun linkOwner(pin: String, credential: OwnerCredential, createAccount: Boolean, onDone: () -> Unit) {
+        val auth = ownerAuth ?: return
+        if (!unlocked || busy) return
         val requiresPin = !initialOwnerEmailOffer || linkedOwnerEmail != null
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
-            linkedOwnerEmail = withContext(Dispatchers.IO) {
-                if (requiresPin) requireOwnerPin(pin)
-                val account = auth.authenticate(email.trim(), password, createAccount)
+            if (requiresPin) withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            val account = ownerSession(auth, credential, createAccount)?.account ?: return@runAction
+            val google = credential is OwnerCredential.Google
+            withContext(Dispatchers.IO) {
                 if (!preferences.edit().putString("ownerEmail", account.email)
-                        .putString("ownerUid", account.uid).commit()) throw IOException()
-                account.email
+                        .putString("ownerUid", account.uid).putBoolean("ownerGoogle", google).commit()) throw IOException()
             }
+            isGoogleOwner = google
+            linkedOwnerEmail = account.email
             dismissInitialOwnerEmailOffer()
             onDone()
         }
@@ -188,8 +203,11 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         runAction("Tautan email tidak dapat dihapus. Coba lagi.") {
             withContext(Dispatchers.IO) {
                 requireOwnerPin(pin)
-                if (!preferences.edit().remove("ownerEmail").remove("ownerUid").commit()) throw IOException()
+                if (!preferences.edit().remove("ownerEmail").remove("ownerUid").remove("ownerGoogle").commit()) {
+                    throw IOException()
+                }
             }
+            isGoogleOwner = false
             linkedOwnerEmail = null
             onDone()
         }
@@ -233,7 +251,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     internal fun runCloudBackup(
-        restore: Boolean, pin: String, email: String, password: String, onDone: () -> Unit
+        restore: Boolean, pin: String, credential: OwnerCredential, onDone: () -> Unit
     ) {
         val auth = ownerAuth ?: return
         val cloud = cloudBackup ?: return
@@ -241,12 +259,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         val fallback = if (restore) "Cadangan tidak dapat dipulihkan. Periksa koneksi atau coba lagi."
             else "Cadangan tidak dapat dibuat. Periksa koneksi atau coba lagi."
         runAction(fallback) {
+            withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            val session = linkedOwnerSession(auth, credential) ?: return@runAction
             val restored = withContext(Dispatchers.IO) {
-                requireOwnerPin(pin)
-                val session = auth.session(requireRecoveryEmail(email), password)
-                if (!session.account.matches(preferences.getString("ownerUid", null))) {
-                    throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
-                }
                 val context = getApplication<Application>()
                 val archive = BackupArchive(context, database)
                 val file = File.createTempFile("cloud-backup-", ".zip", context.cacheDir)
@@ -288,15 +303,11 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         profitUnlocked = false
     }
 
-    fun verifyOwnerForPinReset(enteredEmail: String, password: String, onDone: () -> Unit) {
+    internal fun verifyOwnerForPinReset(credential: OwnerCredential, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
-        if (unlocked || !pinConfigured || resettingPin) return
+        if (unlocked || !pinConfigured || resettingPin || linkedOwnerEmail == null) return
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
-            val email = requireRecoveryEmail(enteredEmail)
-            val account = withContext(Dispatchers.IO) { auth.authenticate(email, password, createAccount = false) }
-            if (!account.matches(preferences.getString("ownerUid", null))) {
-                throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
-            }
+            linkedOwnerSession(auth, credential) ?: return@runAction
             resettingPin = true
             onDone()
         }
@@ -304,12 +315,35 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     fun sendOwnerPasswordReset(enteredEmail: String, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
-        if (unlocked || !pinConfigured || resettingPin) return
+        if (unlocked || !pinConfigured || resettingPin || isGoogleOwner) return
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
             val email = requireRecoveryEmail(enteredEmail)
             withContext(Dispatchers.IO) { auth.sendPasswordReset(email) }
             onDone()
         }
+    }
+
+    private suspend fun ownerSession(
+        auth: OwnerAuth, credential: OwnerCredential, createAccount: Boolean
+    ): OwnerSession? = when (credential) {
+        is OwnerCredential.Password -> withContext(Dispatchers.IO) {
+            auth.session(credential.email, credential.password, createAccount)
+        }
+        is OwnerCredential.Google -> credential.getIdToken()?.let { token ->
+            withContext(Dispatchers.IO) { auth.googleSession(token, createAccount) }
+        }
+    }
+
+    private suspend fun linkedOwnerSession(auth: OwnerAuth, credential: OwnerCredential): OwnerSession? {
+        val verifiedCredential = when (credential) {
+            is OwnerCredential.Password -> OwnerCredential.Password(requireRecoveryEmail(credential.email), credential.password)
+            is OwnerCredential.Google -> credential
+        }
+        val session = ownerSession(auth, verifiedCredential, createAccount = false) ?: return null
+        if (!session.account.matches(preferences.getString("ownerUid", null))) {
+            throw OwnerAuthException("Akun ini bukan akun pemilik yang terhubung di perangkat ini.")
+        }
+        return session
     }
 
     private fun requireRecoveryEmail(enteredEmail: String): String {

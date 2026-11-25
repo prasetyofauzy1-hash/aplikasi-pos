@@ -16,6 +16,9 @@ fun firebaseSetting(name: String, default: String = "") =
         .trim().replace("\\", "\\\\").replace("\"", "\\\"")
 
 val firebaseApiKey = firebaseSetting("FIREBASE_API_KEY")
+val googleWebClientId = firebaseSetting(
+    "GOOGLE_WEB_CLIENT_ID", "694596554967-9c4j4f1pmm5jlctankqkfpp92tqmede6.apps.googleusercontent.com"
+)
 val firebaseBackupUrl = firebaseSetting(
     "FIREBASE_BACKUP_URL", "https://aplikasi-pos-3d3a7-default-rtdb.asia-southeast1.firebasedatabase.app"
 )
@@ -31,6 +34,7 @@ android {
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "FIREBASE_API_KEY", "\"$firebaseApiKey\"")
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"$googleWebClientId\"")
         buildConfigField("String", "FIREBASE_BACKUP_URL", "\"$firebaseBackupUrl\"")
     }
     buildFeatures {
@@ -51,6 +55,9 @@ ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.03.00"))
     implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")

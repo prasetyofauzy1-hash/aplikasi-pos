@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,7 +23,9 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
     val dismiss = { if (!model.busy) onDismiss() }
     val skippable = model.initialOwnerEmailOffer
     val linked = model.linkedOwnerEmail != null
+    val google = googleOwnerCredential()
     var unlinking by rememberSaveable { mutableStateOf(!model.emailAvailable) }
+    var showPassword by rememberSaveable { mutableStateOf(linked && !model.isGoogleOwner) }
     var pin by remember { mutableStateOf("") }
     var email by rememberSaveable { mutableStateOf("") }
     var confirmation by rememberSaveable { mutableStateOf("") }
@@ -48,15 +51,30 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
                     Text("Email ini tidak akan bisa digunakan untuk memulihkan PIN perangkat ini. Data toko tetap tersimpan.")
                 } else {
                     Text("Gunakan akun email untuk membuat PIN baru jika lupa atau memakai backup cloud jika tersedia. Ini opsional dan perlu internet.")
-                    OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
-                    OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
-                    if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
-                    OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
-                    TextButton(enabled = !model.busy, onClick = {
-                        createAccount = !createAccount
-                        password = ""
-                        model.clearError()
-                    }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
+                    if (!linked) Text("Dalam mode tamu, data toko hanya disimpan di perangkat ini.")
+                    if (model.googleOwnerAvailable) {
+                        OutlinedButton(
+                            onClick = { model.linkGoogleOwner(pin, google, onDismiss) },
+                            enabled = !model.busy && (skippable || pin.length == 6),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text(if (model.busy) "Memproses…" else "Masuk dengan Google") }
+                    }
+                    if (showPassword || !model.googleOwnerAvailable) {
+                        OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
+                        OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
+                        if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
+                        OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
+                        TextButton(enabled = !model.busy, onClick = {
+                            createAccount = !createAccount
+                            password = ""
+                            model.clearError()
+                        }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
+                    } else {
+                        TextButton(enabled = !model.busy, onClick = {
+                            model.clearError()
+                            showPassword = true
+                        }) { Text("Gunakan email dan kata sandi") }
+                    }
                     if (linked) {
                         TextButton(enabled = !model.busy, onClick = {
                             unlinking = true
@@ -70,22 +88,24 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = !model.busy && (skippable || pin.length == 6) &&
-                    (unlinking || confirmed && if (createAccount) password.length >= 6 else password.isNotEmpty()),
-                onClick = {
-                    if (unlinking) model.unlinkOwnerEmail(pin, onDismiss)
-                    else model.linkOwnerEmail(pin, email, confirmation, password, createAccount, onDismiss)
-                }
-            ) { Text(when {
-                model.busy -> "Memproses…"
-                unlinking -> "Hapus tautan"
-                createAccount -> "Daftar"
-                else -> "Masuk"
-            }) }
+            if (unlinking || showPassword || !model.googleOwnerAvailable) {
+                TextButton(
+                    enabled = !model.busy && (skippable || pin.length == 6) &&
+                        (unlinking || confirmed && if (createAccount) password.length >= 6 else password.isNotEmpty()),
+                    onClick = {
+                        if (unlinking) model.unlinkOwnerEmail(pin, onDismiss)
+                        else model.linkOwnerEmail(pin, email, confirmation, password, createAccount, onDismiss)
+                    }
+                ) { Text(when {
+                    model.busy -> "Memproses…"
+                    unlinking -> "Hapus tautan"
+                    createAccount -> "Daftar"
+                    else -> "Masuk"
+                }) }
+            }
         },
         dismissButton = {
-            TextButton(onClick = dismiss, enabled = !model.busy) { Text(if (skippable) "Nanti saja" else "Batal") }
+            TextButton(onClick = dismiss, enabled = !model.busy) { Text(if (linked) "Batal" else "Lanjutkan sebagai tamu") }
         }
     )
 }
@@ -101,15 +121,15 @@ internal fun OwnerEmailField(value: String, label: String, enabled: Boolean, onC
 internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) {
     val dismiss = { if (!model.busy) onDismiss() }
     val email = model.linkedOwnerEmail
-    if (!model.emailAvailable || email == null) {
+    if (!model.emailAvailable || email == null || model.isGoogleOwner && !model.googleOwnerAvailable) {
         AlertDialog(
             onDismissRequest = dismiss,
             title = { Text("Lupa PIN?") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (email != null) {
-                        Text("Email pemilik sudah terhubung, tetapi versi ini tidak mendukung login email. " +
-                            "Perbarui ke versi Kasir Rapi dengan login email aktif tanpa menghapus aplikasi. Data toko tetap tersimpan.")
+                        Text("Akun pemilik sudah terhubung, tetapi versi ini tidak mendukung metode login tersebut. " +
+                            "Perbarui Kasir Rapi tanpa menghapus aplikasi. Data toko tetap tersimpan.")
                     } else {
                         Text("Tidak ada email pemilik yang terhubung, sehingga PIN tidak dapat dipulihkan.")
                     }
@@ -118,6 +138,28 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
                 }
             },
             confirmButton = { TextButton(onClick = dismiss) { Text("Mengerti") } }
+        )
+        return
+    }
+
+    if (model.isGoogleOwner) {
+        val google = googleOwnerCredential()
+        AlertDialog(
+            onDismissRequest = dismiss,
+            title = { Text("Pulihkan akses pemilik") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Masuk dengan akun Google pemilik yang terhubung untuk membuat PIN baru tanpa menghapus data. Perlu internet.")
+                    Text("Email terhubung: ${maskedOwnerEmail(email)}")
+                    ErrorText(model.error)
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !model.busy, onClick = { model.verifyOwnerForPinReset(google, onDismiss) }) {
+                    Text(if (model.busy) "Memproses…" else "Masuk dengan Google")
+                }
+            },
+            dismissButton = { TextButton(onClick = dismiss, enabled = !model.busy) { Text("Batal") } }
         )
         return
     }
@@ -148,7 +190,7 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
         },
         confirmButton = {
             TextButton(enabled = !model.busy && enteredEmail.isNotBlank() && password.isNotEmpty(), onClick = {
-                model.verifyOwnerForPinReset(enteredEmail, password, onDismiss)
+                model.verifyOwnerForPinReset(OwnerCredential.Password(enteredEmail, password), onDismiss)
             }) { Text(if (model.busy) "Memproses…" else "Masuk") }
         },
         dismissButton = { TextButton(onClick = dismiss, enabled = !model.busy) { Text("Batal") } }

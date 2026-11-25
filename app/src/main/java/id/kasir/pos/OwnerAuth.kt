@@ -9,6 +9,11 @@ import java.net.URLEncoder
 internal data class OwnerAccount(val uid: String, val email: String)
 internal class OwnerSession(val account: OwnerAccount, val idToken: String)
 
+internal sealed interface OwnerCredential {
+    class Password(val email: String, val password: String) : OwnerCredential
+    class Google(val getIdToken: suspend () -> String?) : OwnerCredential
+}
+
 internal class OwnerAuth(
     key: String,
     private val baseUrl: String = "https://identitytoolkit.googleapis.com/v1"
@@ -21,6 +26,22 @@ internal class OwnerAuth(
     fun session(email: String, password: String, createAccount: Boolean = false): OwnerSession {
         val result = post(if (createAccount) "signUp" else "signInWithPassword",
             JSONObject().put("email", email).put("password", password).put("returnSecureToken", true))
+        return sessionFrom(result)
+    }
+
+    fun googleSession(idToken: String, createAccount: Boolean): OwnerSession {
+        val result = post("signInWithIdp", JSONObject()
+            .put("postBody", "id_token=${URLEncoder.encode(idToken, "UTF-8")}&providerId=google.com")
+            .put("requestUri", "http://localhost")
+            .put("returnSecureToken", true)
+            .put("autoCreate", createAccount))
+        if (result.optBoolean("needConfirmation")) {
+            throw OwnerAuthException("Email ini sudah terhubung dengan metode lain. Coba masuk dengan email dan kata sandi.")
+        }
+        return sessionFrom(result)
+    }
+
+    private fun sessionFrom(result: JSONObject): OwnerSession {
         val uid = result.getString("localId")
         val accountEmail = result.getString("email")
         val token = result.getString("idToken")
@@ -54,6 +75,15 @@ internal class OwnerAuth(
                     "INVALID_LOGIN_CREDENTIALS", "INVALID_PASSWORD", "EMAIL_NOT_FOUND", "USER_DISABLED" ->
                         "Email atau kata sandi salah."
                     "WEAK_PASSWORD" -> "Kata sandi belum memenuhi syarat keamanan."
+                    "FEDERATED_USER_ID_ALREADY_LINKED", "NEED_CONFIRMATION", "ACCOUNT_EXISTS_WITH_DIFFERENT_CREDENTIAL" ->
+                        "Email ini sudah terhubung dengan metode lain. Coba masuk dengan email dan kata sandi."
+                    "OPERATION_NOT_ALLOWED" -> if (action == "signInWithIdp") {
+                        "Login Google belum diaktifkan untuk aplikasi ini. Gunakan email dan kata sandi."
+                    } else "Layanan akun tidak tersedia. Coba lagi nanti."
+                    "INVALID_IDP_RESPONSE" -> "Login Google tidak dapat diverifikasi. Pilih akun dan coba lagi."
+                    "USER_NOT_FOUND" -> if (action == "signInWithIdp") {
+                        "Akun ini bukan akun pemilik yang terhubung di perangkat ini."
+                    } else "Layanan akun tidak tersedia. Coba lagi nanti."
                     "TOO_MANY_ATTEMPTS_TRY_LATER" -> "Terlalu banyak percobaan. Coba lagi nanti."
                     else -> "Layanan akun tidak tersedia. Coba lagi nanti."
                 })

@@ -38,7 +38,9 @@ internal fun CloudBackupSettings(model: RegisterModel) {
     HorizontalDivider(color = Line)
     EmptyPanel("Backup cloud", if (linkedEmail == null) "Hubungkan email pemilik di atas untuk mencadangkan atau memulihkan data."
         else "Simpan salinan produk, stok, riwayat, dan profil toko. Perlu internet dan akun pemilik yang sama.")
-    if (linkedEmail != null) {
+    if (linkedEmail != null && model.isGoogleOwner && !model.googleOwnerAvailable) {
+        Text("Backup cloud memerlukan versi aplikasi yang mendukung login Google.")
+    } else if (linkedEmail != null) {
         CloudAction.entries.forEach { choice ->
             OutlinedButton(
                 onClick = { model.clearError(); result = null; action = choice },
@@ -62,6 +64,7 @@ private fun CloudBackupDialog(
     var pin by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val google = googleOwnerCredential()
     val dismiss = {
         if (!model.busy) {
             model.clearError()
@@ -81,16 +84,28 @@ private fun CloudBackupDialog(
                     enabled = !model.busy, singleLine = true, visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
                 )
-                OwnerEmailField(email, "Email pemilik", !model.busy) { email = it; model.clearError() }
-                OwnerPasswordField(password, !model.busy) { password = it; model.clearError() }
+                if (model.isGoogleOwner) {
+                    Text("Masuk dengan akun Google pemilik untuk melanjutkan.")
+                } else {
+                    OwnerEmailField(email, "Email pemilik", !model.busy) { email = it; model.clearError() }
+                    OwnerPasswordField(password, !model.busy) { password = it; model.clearError() }
+                }
                 ErrorText(model.error)
             }
         },
         confirmButton = {
             TextButton(
-                enabled = !model.busy && pin.length == 6 && email.isNotBlank() && password.isNotEmpty(),
-                onClick = { model.runCloudBackup(action == CloudAction.RESTORE, pin, email, password, onDone) }
-            ) { Text(if (model.busy) "Memproses…" else if (action == CloudAction.RESTORE) "Ganti data perangkat" else "Cadangkan") }
+                enabled = !model.busy && pin.length == 6 && (model.isGoogleOwner || email.isNotBlank() && password.isNotEmpty()),
+                onClick = {
+                    val credential = if (model.isGoogleOwner) google else OwnerCredential.Password(email, password)
+                    model.runCloudBackup(action == CloudAction.RESTORE, pin, credential, onDone)
+                }
+            ) { Text(when {
+                model.busy -> "Memproses…"
+                model.isGoogleOwner -> "Masuk dengan Google"
+                action == CloudAction.RESTORE -> "Ganti data perangkat"
+                else -> "Cadangkan"
+            }) }
         },
         dismissButton = { TextButton(onClick = dismiss, enabled = !model.busy) { Text("Batal") } }
     )
