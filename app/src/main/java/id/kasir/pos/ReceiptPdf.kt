@@ -51,7 +51,29 @@ internal fun writeReceiptPdf(context: Context, receipt: Receipt): Uri {
     }
 }
 
-private class PdfReceiptBlock(val height: Int, val draw: Canvas.() -> Unit)
+internal class PdfReceiptBlock(
+    val height: Int,
+    val keepWithNext: Boolean = false,
+    val draw: Canvas.() -> Unit
+)
+
+internal fun paginateReceiptPdf(blocks: List<PdfReceiptBlock>): List<List<PdfReceiptBlock>> = buildList {
+    val capacity = maxPageHeight - 2 * padding
+    var available = capacity
+    var start = 0
+    blocks.forEachIndexed { index, block ->
+        val followingHeight = if (block.keepWithNext) blocks.getOrNull(index + 1)?.height ?: 0 else 0
+        val groupHeight = block.height + followingHeight
+        val required = if (groupHeight <= capacity) groupHeight else block.height
+        if (required > available && index > start) {
+            add(blocks.subList(start, index))
+            start = index
+            available = capacity
+        }
+        available -= block.height
+    }
+    add(blocks.subList(start, blocks.size))
+}
 
 private fun drawReceiptPdf(document: PdfDocument, entries: List<ReceiptEntry>, logo: Bitmap?) {
     val rule = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -73,11 +95,9 @@ private fun drawReceiptPdf(document: PdfDocument, entries: List<ReceiptEntry>, l
             }
         }
     }
-    var pageNumber = 1
-    var height = 2 * padding
-    val pageBlocks = mutableListOf<PdfReceiptBlock>()
-    fun finishPage() {
-        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, height, pageNumber++).create())
+    paginateReceiptPdf(blocks).forEachIndexed { index, pageBlocks ->
+        val height = 2 * padding + pageBlocks.sumOf { it.height }
+        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, height, index + 1).create())
         page.canvas.apply {
             drawColor(Color.WHITE)
             translate(padding.toFloat(), padding.toFloat())
@@ -89,15 +109,7 @@ private fun drawReceiptPdf(document: PdfDocument, entries: List<ReceiptEntry>, l
             }
         }
         document.finishPage(page)
-        pageBlocks.clear()
-        height = 2 * padding
     }
-    blocks.forEach { block ->
-        if (height + block.height > maxPageHeight) finishPage()
-        pageBlocks.add(block)
-        height += block.height
-    }
-    finishPage()
 }
 
 private fun pdfReceiptRow(row: ReceiptEntry.Row): List<PdfReceiptBlock> {
@@ -115,14 +127,16 @@ private fun pdfReceiptRow(row: ReceiptEntry.Row): List<PdfReceiptBlock> {
     val amount = row.amount
     val amountWidth = if (amount == null) 0 else kotlin.math.ceil(text.measureText(amount)).toInt()
     val centered = row.style == ReceiptStyle.STORE || row.style == ReceiptStyle.ADDRESS
-    val rowTop = if (row.style == ReceiptStyle.ITEM) 4 else 0
+    // The receipt layout emits the quantity and price immediately after the item name.
+    val isItemName = row.style == ReceiptStyle.ITEM
+    val rowTop = if (isItemName) 4 else 0
     val availableWidth = if (amount == null) contentWidth else contentWidth - amountWidth - 8
     val layout = StaticLayout.Builder.obtain(row.label, 0, row.label.length, text, availableWidth)
         .setIncludePad(false)
         .setAlignment(if (centered) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL)
         .build()
     if (layout.height + rowTop + 3 <= maxPageHeight - 2 * padding) {
-        return listOf(PdfReceiptBlock(layout.height + rowTop + 3) {
+        return listOf(PdfReceiptBlock(layout.height + rowTop + 3, keepWithNext = isItemName) {
             translate(0f, rowTop.toFloat())
             layout.draw(this)
             if (amount != null) drawText(amount, (contentWidth - amountWidth).toFloat(), layout.getLineBaseline(0).toFloat(), text)
@@ -131,7 +145,7 @@ private fun pdfReceiptRow(row: ReceiptEntry.Row): List<PdfReceiptBlock> {
     return List(layout.lineCount) { line ->
         val top = layout.getLineTop(line)
         val lineHeight = layout.getLineBottom(line) - top
-        PdfReceiptBlock(lineHeight) {
+        PdfReceiptBlock(lineHeight, keepWithNext = isItemName && line == layout.lineCount - 1) {
             clipRect(0, 0, contentWidth, lineHeight)
             translate(0f, -top.toFloat())
             layout.draw(this)
