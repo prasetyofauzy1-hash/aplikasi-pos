@@ -1,9 +1,6 @@
 package id.kasir.pos
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
 import android.graphics.BitmapFactory
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.view.Window
@@ -474,33 +471,4 @@ internal fun Header(kicker: String, title: String, description: String) {
         Text(title, color = Ink, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 37.sp)
         Text(description, color = Muted, style = MaterialTheme.typography.bodyMedium)
     }
-}
-
-@Composable
-internal fun ShareReceiptButton(receipt: Receipt) {
-    val context = LocalContext.current
-    Button(modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), onClick = {
-        val share = Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, receipt.asText())
-        }
-        context.startActivity(Intent.createChooser(share, "Bagikan struk"))
-    }) { Text("Bagikan struk") }
-}
-
-@Composable
-internal fun EmailReceiptButton(receipt: Receipt) {
-    val context = LocalContext.current
-    var emailUnavailable by remember { mutableStateOf(false) }
-    OutlinedButton(modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), onClick = {
-        val subject = Uri.encode("Struk ${ticket(receipt.sale.id)} • ${receipt.sale.storeName}")
-        val body = Uri.encode(receipt.asText())
-        try {
-            context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:?subject=$subject&body=$body")))
-            emailUnavailable = false
-        } catch (_: ActivityNotFoundException) {
-            emailUnavailable = true
-        }
-    }) { Text("Kirim via Email") }
-    if (emailUnavailable) ErrorText("Tidak ada aplikasi email. Pasang aplikasi email atau pilih Bagikan struk.")
 }

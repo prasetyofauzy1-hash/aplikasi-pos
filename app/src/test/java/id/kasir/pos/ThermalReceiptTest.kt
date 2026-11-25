@@ -1,6 +1,7 @@
 package id.kasir.pos
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,14 +41,36 @@ class ThermalReceiptTest {
         assertTrue(output.startsWith("\u001B@\u001Ba\u0001Toko Cafe\nJalan Uji No. 1\n\u001Ba\u0000"))
         assertTrue(output.contains(dateLabel(0).replace(" • ", " - ")))
         assertTrue(output.contains("\nTRX-00123\n"))
-        assertTrue(output.endsWith("\u001Ba\u0001Terima kasih\n\u001Bd\u0004\u001DV\u0000"))
+        assertTrue(output.endsWith("Rp14.000\n\u001Bd\u0004\u001DV\u0000"))
     }
 
     @Test fun qrisDoesNotPrintCashFieldsAndMissingIdIsOmitted() {
         val qris = receipt.copy(sale = receipt.sale.copy(id = 0, paid = receipt.sale.total, method = Payment.QRIS.label))
         val lines = printedLines(qris, ThermalPaper.MM58)
-        assertTrue(lines.contains("Pembayaran: QRIS"))
+        assertTrue(lines.last { it.isNotBlank() }.let { it.startsWith("QRIS") && it.endsWith("Rp36.000") })
         assertFalse(lines.any { it.startsWith("Tunai") || it.startsWith("Kembalian") || it.startsWith("TRX-") })
+    }
+
+    @Test fun exactCashOmitsTheChangeRow() {
+        val exact = receipt.copy(sale = receipt.sale.copy(paid = receipt.sale.total))
+        val lines = printedLines(exact, ThermalPaper.MM58)
+        assertTrue(lines.last { it.isNotBlank() }.let { it.startsWith("Tunai") && it.endsWith("Rp36.000") })
+        assertFalse(lines.any { it.startsWith("Kembalian") })
+    }
+
+    @Test fun logoRasterPacksOpaqueDarkPixelsAndPreservesHeaderBytes() {
+        val pixels = IntArray(9) { 0xFFFFFFFF.toInt() }
+        pixels[0] = 0xFF000000.toInt()
+        pixels[1] = 0x00000000
+        pixels[2] = 0xFF999999.toInt()
+        pixels[8] = 0xFF000000.toInt()
+        val logo = thermalRaster(9, 1, pixels)
+        assertArrayEquals(byteArrayOf(0x1D, 0x76, 0x30, 0, 2, 0, 1, 0, 0xA0.toByte(), 0x80.toByte()), logo)
+        val output = thermalReceipt(receipt, ThermalPaper.MM58, logo)
+        val header = "\u001B@\u001Ba\u0001".toByteArray(Charsets.US_ASCII)
+        val address = "Jalan Uji No. 1\n".toByteArray(Charsets.US_ASCII)
+        assertArrayEquals(header + logo + address, output.copyOfRange(0, header.size + logo.size + address.size))
+        assertFalse(output.toString(Charsets.US_ASCII).contains("Toko Cafe"))
     }
 
     @Test fun includesCashierSnapshotOnTextAndPrintedReceiptsButNotLegacyReceipts() {
