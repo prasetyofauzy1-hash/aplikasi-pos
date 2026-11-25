@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -337,7 +338,7 @@ private fun BrandBar(profile: StoreProfile, narrow: Boolean) {
         ) {
             StoreLogo(profile.logoName, Modifier.size(if (narrow) 32.dp else 40.dp).clip(RoundedCornerShape(13.dp)))
             Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text("Kasir Rapi", color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp,
+                Text(stringResource(R.string.app_name), color = Ink, fontWeight = FontWeight.Bold, fontSize = 17.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(profile.name, color = Muted, style = MaterialTheme.typography.labelMedium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -397,7 +398,7 @@ private fun UnlockScreen(model: RegisterModel) {
             Column(Modifier.fillMaxWidth().padding(23.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 StoreLogo("", Modifier.size(50.dp).clip(RoundedCornerShape(16.dp)))
                 Text("KASIR UNTUK TOKO ANDA", color = Lime, fontSize = 11.sp, letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
-                Text("Kasir Rapi", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 39.sp, lineHeight = 45.sp)
+                Text(stringResource(R.string.app_name), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 39.sp, lineHeight = 45.sp)
                 Text("Kelola penjualan dan stok, bahkan tanpa internet.", color = Color(0xFFD4E8DF))
             }
         }
