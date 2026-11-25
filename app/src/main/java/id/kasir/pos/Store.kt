@@ -543,8 +543,9 @@ fun Receipt.asText() = buildString {
     charges.forEach { appendLine("${it.name}: ${rupiah(it.amount)}") }
     appendLine("Total: ${rupiah(sale.total)}")
     appendLine("${sale.method}: ${rupiah(sale.paid)}")
-    if (sale.method == Payment.CASH.label) appendLine("Kembalian: ${rupiah(sale.paid - sale.total)}")
-    append("Terima kasih sudah berbelanja!")
+    if (sale.method == Payment.CASH.label && sale.paid > sale.total) {
+        appendLine("Kembalian: ${rupiah(sale.paid - sale.total)}")
+    }
 }
 
 internal val Receipt.hasAdjustments get() = charges.isNotEmpty()

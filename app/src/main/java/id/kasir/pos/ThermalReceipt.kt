@@ -1,10 +1,11 @@
 package id.kasir.pos
 
+import java.io.ByteArrayOutputStream
 import java.text.Normalizer
 
-internal enum class ThermalPaper(val label: String, val columns: Int) {
-    MM58("58 mm", 32),
-    MM80("80 mm", 48)
+internal enum class ThermalPaper(val label: String, val columns: Int, val logoWidth: Int) {
+    MM58("58 mm", 32, 192),
+    MM80("80 mm", 48, 256)
 }
 
 private val combiningMarks = Regex("\\p{M}+")
@@ -28,33 +29,43 @@ private fun String.printerText() = Normalizer.normalize(this, Normalizer.Form.NF
     }
     .replace(whitespace, " ").trim().replace(nonPrintable, "?")
 
-internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper): ByteArray = thermalDocument(paper) {
-    val sale = receipt.sale
-    alignCenter()
-    line(sale.storeName)
-    line(sale.storeAddress)
-    alignLeft()
-    line(dateLabel(sale.time).replace(" • ", " - "))
-    if (sale.id > 0) line(ticket(sale.id))
-    sale.cashierLabel?.let { line(it) }
-    divider()
-    receipt.lines.forEach { item ->
-        line(item.productName)
-        row("${item.quantity} x ${rupiah(item.unitPrice + item.discount)}", rupiah(item.quantity * (item.unitPrice + item.discount)))
-        item.detailLines().forEach { line(it) }
+internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper, logo: ByteArray? = null): ByteArray =
+    thermalDocument(paper) {
+        alignCenter()
+        if (logo != null) raster(logo)
+        var centered = true
+        receipt.entries().forEach { entry ->
+            when (entry) {
+                ReceiptEntry.Rule -> divider()
+                is ReceiptEntry.Row -> {
+                    if (centered && entry.style == ReceiptStyle.METADATA) {
+                        alignLeft()
+                        centered = false
+                    }
+                    val label = if (entry.style == ReceiptStyle.METADATA) entry.label.replace(" • ", " - ") else entry.label
+                    if (entry.amount == null) line(label) else row(label, entry.amount)
+                }
+            }
+        }
     }
-    divider()
-    if (receipt.hasAdjustments) row("Subtotal", rupiah(sale.subtotal))
-    receipt.charges.forEach { row(it.name, rupiah(it.amount)) }
-    row("Total", rupiah(sale.total))
-    line("Pembayaran: ${sale.method}")
-    if (sale.method == Payment.CASH.label) {
-        row("Tunai", rupiah(sale.paid))
-        row("Kembalian", rupiah(sale.paid - sale.total))
+
+internal fun thermalRaster(width: Int, height: Int, pixels: IntArray): ByteArray {
+    val stride = (width + 7) / 8
+    val data = ByteArray(8 + stride * height)
+    byteArrayOf(0x1D, 0x76, 0x30, 0, stride.toByte(), (stride shr 8).toByte(), height.toByte(), (height shr 8).toByte())
+        .copyInto(data)
+    for (y in 0 until height) {
+        for (x in 0 until width) {
+            val argb = pixels[y * width + x]
+            val alpha = argb ushr 24
+            val gray = ((argb shr 16 and 255) * 30 + (argb shr 8 and 255) * 59 + (argb and 255) * 11) / 100
+            if ((255 - gray) * alpha > 127 * 255) {
+                val index = 8 + y * stride + x / 8
+                data[index] = (data[index].toInt() or (0x80 shr (x % 8))).toByte()
+            }
+        }
     }
-    divider()
-    alignCenter()
-    line("Terima kasih")
+    return data
 }
 
 internal fun thermalPrinterTest(profile: StoreProfile, paper: ThermalPaper): ByteArray = thermalDocument(paper) {
@@ -71,6 +82,17 @@ private fun thermalDocument(paper: ThermalPaper, content: ThermalDocument.() -> 
 
 private class ThermalDocument(private val width: Int) {
     private val output = StringBuilder("\u001B@")
+    private val bytes = ByteArrayOutputStream()
+
+    private fun flushText() {
+        bytes.write(output.toString().toByteArray(Charsets.US_ASCII))
+        output.clear()
+    }
+
+    fun raster(data: ByteArray) {
+        flushText()
+        bytes.write(data)
+    }
 
     fun alignCenter() { output.append("\u001Ba\u0001") }
 
@@ -100,5 +122,9 @@ private class ThermalDocument(private val width: Int) {
         }
     }
 
-    fun finish(): ByteArray = output.append("\u001Bd\u0004\u001DV\u0000").toString().toByteArray(Charsets.US_ASCII)
+    fun finish(): ByteArray {
+        output.append("\u001Bd\u0004\u001DV\u0000")
+        flushText()
+        return bytes.toByteArray()
+    }
 }

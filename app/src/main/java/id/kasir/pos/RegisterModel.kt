@@ -611,7 +611,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     }
 
     internal fun printReceipt(receipt: Receipt, onResult: (String?) -> Unit) =
-        print(onResult) { paper -> thermalReceipt(receipt, paper) }
+        print(onResult) { paper ->
+            thermalReceipt(receipt, paper, receiptPrinterLogo(getApplication(), receipt.sale.logoName, paper))
+        }
 
     private fun print(onResult: (String?) -> Unit, document: (ThermalPaper) -> ByteArray) {
         if (printing) return

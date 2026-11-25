@@ -10,6 +10,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -34,11 +35,13 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -460,47 +463,71 @@ private fun DeleteSaleDialog(deletion: SaleDeletion, model: RegisterModel, onDis
 @Composable
 internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout: Boolean, onDone: () -> Unit) {
     val sale = receipt.sale
+    val context = LocalContext.current
+    val logo = remember(context, sale.logoName) { loadReceiptLogo(context, sale.logoName)?.asImageBitmap() }
+    val entries = remember(receipt) { receipt.entries() }
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         EmptyPanel(if (fromCheckout) "✓  Transaksi tersimpan" else "Struk tersimpan", "${ticket(sale.id)}  •  ${sale.method}")
-        Surface(shape = Shape, color = Color.White, border = BorderStroke(1.dp, Line)) {
-            Column(Modifier.fillMaxWidth().padding(19.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    val logoSize = if (sale.logoName.isBlank()) Modifier.size(54.dp)
-                        else Modifier.size(width = 128.dp, height = 88.dp)
-                    StoreLogo(sale.logoName, logoSize)
-                    Text(sale.storeName, textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    if (sale.storeAddress.isNotBlank()) Text(sale.storeAddress, textAlign = TextAlign.Center, color = Muted)
-                    Text(dateLabel(sale.time), color = Muted, style = MaterialTheme.typography.bodySmall)
-                    sale.cashierLabel?.let { Text(it, textAlign = TextAlign.Center, color = Muted) }
+        Surface(color = Color.White, border = BorderStroke(1.dp, Line)) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                if (logo != null) {
+                    Image(logo, contentDescription = "Logo toko",
+                        modifier = Modifier.align(Alignment.CenterHorizontally).size(width = 156.dp, height = 104.dp),
+                        contentScale = ContentScale.Fit)
                 }
-                HorizontalDivider(color = Line)
-                receipt.lines.forEach { line ->
-                    Column {
-                        MetricRow("${line.quantity} × ${line.productName}", rupiah(line.quantity * (line.unitPrice + line.discount)))
-                        line.detailLines().forEach { Text(it, color = Muted, style = MaterialTheme.typography.bodySmall) }
+                entries.forEach { entry ->
+                    when (entry) {
+                        ReceiptEntry.Rule -> ReceiptRule()
+                        is ReceiptEntry.Row -> ReceiptLine(entry)
                     }
                 }
-                HorizontalDivider(color = Line)
-                if (receipt.hasAdjustments) MetricRow("Subtotal", rupiah(sale.subtotal))
-                receipt.charges.forEach { MetricRow(it.name, rupiah(it.amount)) }
-                MetricRow("Total", rupiah(sale.total), strong = true)
-                MetricRow(sale.method, rupiah(sale.paid))
-                if (sale.method == Payment.CASH.label) MetricRow("Kembalian", rupiah(sale.paid - sale.total))
-                Text("Terima kasih sudah berbelanja!", modifier = Modifier.align(Alignment.CenterHorizontally),
-                    color = Muted, style = MaterialTheme.typography.labelMedium)
             }
         }
         PrinterActionButton(model, "Cetak struk") { onResult -> model.printReceipt(receipt, onResult) }
-        ShareReceiptButton(receipt)
-        EmailReceiptButton(receipt)
+        ReceiptShareButtons(receipt)
         if (fromCheckout) {
             TextButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Transaksi baru") }
         } else {
             OutlinedButton(onClick = onDone, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Kembali ke riwayat") }
+        }
+    }
+}
+
+@Composable
+private fun ReceiptRule() {
+    Canvas(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp)) {
+        drawLine(Muted, center.copy(x = 0f), center.copy(x = size.width), strokeWidth = 1.dp.toPx(),
+            pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())))
+    }
+}
+
+@Composable
+private fun ReceiptLine(entry: ReceiptEntry.Row) {
+    val centered = entry.style == ReceiptStyle.STORE || entry.style == ReceiptStyle.ADDRESS
+    val style = when (entry.style) {
+        ReceiptStyle.STORE -> MaterialTheme.typography.titleLarge
+        ReceiptStyle.TOTAL -> MaterialTheme.typography.titleMedium
+        ReceiptStyle.PAYMENT, ReceiptStyle.ITEM -> MaterialTheme.typography.bodyMedium
+        else -> MaterialTheme.typography.bodySmall
+    }
+    val emphasis = entry.style in listOf(ReceiptStyle.STORE, ReceiptStyle.ITEM, ReceiptStyle.TOTAL, ReceiptStyle.PAYMENT)
+    val top = when (entry.style) {
+        ReceiptStyle.ITEM -> 5.dp
+        ReceiptStyle.TOTAL -> 3.dp
+        else -> 0.dp
+    }
+    val amount = entry.amount
+    Row(Modifier.fillMaxWidth().padding(top = top), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val weight = if (emphasis) FontWeight.Bold else FontWeight.Normal
+        Text(entry.label, modifier = Modifier.weight(1f), color = Ink, style = style,
+            fontFamily = FontFamily.Monospace, fontWeight = weight,
+            textAlign = if (centered) TextAlign.Center else TextAlign.Start)
+        if (amount != null) {
+            Text(amount, color = Ink, style = style, fontFamily = FontFamily.Monospace,
+                fontWeight = weight, textAlign = TextAlign.End)
         }
     }
 }
