@@ -40,7 +40,7 @@ APK debug bisa dipasang di Android 7.0 (API 24) atau lebih baru. Pembaruan mempe
 
 Untuk **Masuk dengan Google**, aktifkan **Google** di **Authentication → Sign-in method**. Di **Project settings → General**, daftarkan aplikasi Android `id.kasir.pos` dan tambahkan SHA-1 sertifikat yang menandatangani APK. Build memakai ID klien OAuth web proyek Jus.go; untuk proyek lain, atur `GOOGLE_WEB_CLIENT_ID` di `local.properties` atau environment build.
 
-Pilih **Lanjutkan sebagai tamu** untuk menyimpan data toko hanya di perangkat ini. Tanpa `FIREBASE_API_KEY`, opsi menghubungkan email tidak muncul dan aplikasi tetap bisa digunakan sepenuhnya offline. Pemulihan PIN dan backup cloud memerlukan akun yang sudah dihubungkan.
+Saat pertama membuka aplikasi, masuk dengan Google, gunakan email dan kata sandi, atau pilih **Lanjutkan sebagai tamu** untuk menyimpan data toko hanya di perangkat ini. Setelah itu, buat PIN pemilik. Perangkat yang sudah memiliki PIN langsung meminta PIN tersebut. Tanpa `FIREBASE_API_KEY`, aplikasi langsung meminta pengaturan PIN dan tetap dapat digunakan sepenuhnya offline. Pemulihan PIN dan backup cloud memerlukan akun yang sudah dihubungkan.
 
 ### Backup cloud (opsional)
 

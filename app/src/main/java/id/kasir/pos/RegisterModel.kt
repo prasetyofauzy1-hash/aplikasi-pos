@@ -2,6 +2,7 @@ package id.kasir.pos
 
 import android.app.Application
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -60,8 +61,8 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         private set
     var firstUnlock by mutableStateOf(false)
         private set
-    var initialOwnerEmailOffer by mutableStateOf(false)
-        private set
+    private var onboardingChoice by mutableStateOf<OwnerOnboardingChoice?>(null)
+    internal val needsOwnerOnboarding get() = shouldOfferOwnerOnboarding(pinConfigured, emailAvailable, onboardingChoice)
     var linkedOwnerEmail by mutableStateOf(preferences.getString("ownerEmail", null))
         private set
     internal var isGoogleOwner by mutableStateOf(preferences.getBoolean("ownerGoogle", false))
@@ -112,8 +113,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
     fun clearError() { error = null }
 
     fun authenticate(pin: String, confirmation: String, onRejected: () -> Unit) {
-        if (busy) return
+        if (busy || needsOwnerOnboarding) return
         val needsNewPin = !pinConfigured || resettingPin
+        val newOwner = if (pinConfigured) null else onboardingChoice as? OwnerOnboardingChoice.Linked
         if (pin.length != 6 || !pin.all { it in '0'..'9' }) {
             error = "Masukkan PIN enam angka."
             return
@@ -127,7 +129,7 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             val valid = try {
                 withContext(Dispatchers.IO) {
                     if (needsNewPin) {
-                        savePin(pin)
+                        savePin(pin, newOwner)
                         true
                     } else {
                         verifyOwnerPin(pin)
@@ -139,8 +141,9 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
             }
             if (valid) {
                 firstUnlock = !pinConfigured
-                initialOwnerEmailOffer = firstUnlock && emailAvailable && linkedOwnerEmail == null
                 pinConfigured = true
+                newOwner?.let(::showLinkedOwner)
+                onboardingChoice = null
                 resettingPin = false
                 unlocked = true
             } else {
@@ -150,23 +153,26 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun savePin(pin: String) {
+    private fun savePin(pin: String, newOwner: OwnerOnboardingChoice.Linked?) {
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)
         if (!preferences.edit()
                 .putString("pinSalt", Base64.encodeToString(salt, Base64.NO_WRAP))
                 .putString("pinHash", Base64.encodeToString(derivePin(pin, salt), Base64.NO_WRAP))
                 .remove("pinFailures").remove("pinUntilWall").remove("pinUntilElapsed").remove("pinBoot")
+                .apply { if (newOwner != null) putLinkedOwner(newOwner) }
                 .commit()) throw IOException()
     }
 
-    fun dismissInitialOwnerEmailOffer() {
-        initialOwnerEmailOffer = false
+    internal fun continueAsGuest() {
+        if (busy || !needsOwnerOnboarding) return
+        clearError()
+        onboardingChoice = OwnerOnboardingChoice.Guest
     }
 
     fun linkOwnerEmail(
         pin: String, email: String, confirmation: String, password: String, createAccount: Boolean, onDone: () -> Unit
     ) {
-        if (!emailAvailable || !unlocked || busy) return
+        if (!emailAvailable || (!unlocked && !needsOwnerOnboarding) || busy) return
         if (!ownerEmailsMatch(email, confirmation)) {
             error = "Konfirmasi email tidak sama."
             return
@@ -181,21 +187,32 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
 
     private fun linkOwner(pin: String, credential: OwnerCredential, createAccount: Boolean, onDone: () -> Unit) {
         val auth = ownerAuth ?: return
-        if (!unlocked || busy) return
-        val requiresPin = !initialOwnerEmailOffer || linkedOwnerEmail != null
+        val onboarding = needsOwnerOnboarding
+        if ((!unlocked && !onboarding) || busy) return
         runAction("Tidak dapat terhubung. Periksa koneksi internet, lalu coba lagi.") {
-            if (requiresPin) withContext(Dispatchers.IO) { requireOwnerPin(pin) }
+            if (!onboarding) withContext(Dispatchers.IO) { requireOwnerPin(pin) }
             val account = ownerSession(auth, credential, createAccount)?.account ?: return@runAction
-            val google = credential is OwnerCredential.Google
-            withContext(Dispatchers.IO) {
-                if (!preferences.edit().putString("ownerEmail", account.email)
-                        .putString("ownerUid", account.uid).putBoolean("ownerGoogle", google).commit()) throw IOException()
+            val owner = OwnerOnboardingChoice.Linked(account, credential is OwnerCredential.Google)
+            if (onboarding) {
+                onboardingChoice = owner
+            } else {
+                withContext(Dispatchers.IO) {
+                    if (!preferences.edit().putLinkedOwner(owner).commit()) throw IOException()
+                }
+                showLinkedOwner(owner)
             }
-            isGoogleOwner = google
-            linkedOwnerEmail = account.email
-            dismissInitialOwnerEmailOffer()
             onDone()
         }
+    }
+
+    private fun SharedPreferences.Editor.putLinkedOwner(owner: OwnerOnboardingChoice.Linked) =
+        putString("ownerEmail", owner.account.email)
+            .putString("ownerUid", owner.account.uid)
+            .putBoolean("ownerGoogle", owner.google)
+
+    private fun showLinkedOwner(owner: OwnerOnboardingChoice.Linked) {
+        isGoogleOwner = owner.google
+        linkedOwnerEmail = owner.account.email
     }
 
     fun unlinkOwnerEmail(pin: String, onDone: () -> Unit) {
@@ -364,7 +381,6 @@ class RegisterModel(app: Application) : AndroidViewModel(app) {
         if (busy) return
         receipt = null
         lockProfit()
-        dismissInitialOwnerEmailOffer()
         clearError()
         unlocked = false
     }

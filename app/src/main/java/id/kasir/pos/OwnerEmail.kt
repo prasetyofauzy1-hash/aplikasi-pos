@@ -1,12 +1,20 @@
 package id.kasir.pos
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -14,14 +22,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
 @Composable
-internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
+internal fun OwnerEmailLink(model: RegisterModel, onboarding: Boolean = false, onDismiss: () -> Unit = {}) {
     val dismiss = { if (!model.busy) onDismiss() }
-    val skippable = model.initialOwnerEmailOffer
     val linked = model.linkedOwnerEmail != null
     val google = googleOwnerCredential()
     var unlinking by rememberSaveable { mutableStateOf(!model.emailAvailable) }
@@ -32,82 +41,129 @@ internal fun LinkOwnerEmailDialog(model: RegisterModel, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var createAccount by rememberSaveable { mutableStateOf(true) }
     val confirmed = ownerEmailsMatch(email, confirmation)
-    AlertDialog(
-        onDismissRequest = dismiss,
-        title = { Text(when {
-            unlinking -> "Hapus tautan email pemilik"
-            linked -> "Ubah email pemilik"
-            else -> "Hubungkan email pemilik"
-        }) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!skippable) {
-                    OutlinedTextField(pin, { pin = it.filter { c -> c in '0'..'9' }.take(6); model.clearError() },
-                        Modifier.fillMaxWidth(), label = { Text("PIN pemilik saat ini") },
-                        enabled = !model.busy, singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+    val options: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!onboarding) {
+                OutlinedTextField(pin, { pin = it.filter { c -> c in '0'..'9' }.take(6); model.clearError() },
+                    Modifier.fillMaxWidth(), label = { Text("PIN pemilik saat ini") },
+                    enabled = !model.busy, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+            }
+            if (unlinking) {
+                Text("Email ini tidak akan bisa digunakan untuk memulihkan PIN perangkat ini. Data toko tetap tersimpan.")
+            } else {
+                Text("Gunakan akun email untuk membuat PIN baru jika lupa atau memakai backup cloud jika tersedia. Ini opsional dan perlu internet.")
+                if (!linked) Text("Dalam mode tamu, data toko hanya disimpan di perangkat ini.")
+                if (model.googleOwnerAvailable) {
+                    OwnerLinkOption(
+                        label = if (model.busy) "Memproses…" else "Masuk dengan Google",
+                        onClick = { model.linkGoogleOwner(pin, google, onDismiss) },
+                        enabled = !model.busy && (onboarding || pin.length == 6),
+                        google = true
+                    )
                 }
-                if (unlinking) {
-                    Text("Email ini tidak akan bisa digunakan untuk memulihkan PIN perangkat ini. Data toko tetap tersimpan.")
+                if (showPassword || !model.googleOwnerAvailable) {
+                    OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
+                    OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
+                    if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
+                    OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
+                    TextButton(enabled = !model.busy, onClick = {
+                        createAccount = !createAccount
+                        password = ""
+                        model.clearError()
+                    }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
                 } else {
-                    Text("Gunakan akun email untuk membuat PIN baru jika lupa atau memakai backup cloud jika tersedia. Ini opsional dan perlu internet.")
-                    if (!linked) Text("Dalam mode tamu, data toko hanya disimpan di perangkat ini.")
-                    if (model.googleOwnerAvailable) {
-                        OutlinedButton(
-                            onClick = { model.linkGoogleOwner(pin, google, onDismiss) },
-                            enabled = !model.busy && (skippable || pin.length == 6),
-                            modifier = Modifier.fillMaxWidth()
-                        ) { Text(if (model.busy) "Memproses…" else "Masuk dengan Google") }
-                    }
-                    if (showPassword || !model.googleOwnerAvailable) {
-                        OwnerEmailField(email, "Email", !model.busy) { email = it; model.clearError() }
-                        OwnerEmailField(confirmation, "Konfirmasi email", !model.busy) { confirmation = it; model.clearError() }
-                        if (confirmation.isNotBlank() && !confirmed) ErrorText("Konfirmasi email tidak sama.")
-                        OwnerPasswordField(password, !model.busy, createAccount) { password = it; model.clearError() }
-                        TextButton(enabled = !model.busy, onClick = {
-                            createAccount = !createAccount
-                            password = ""
-                            model.clearError()
-                        }) { Text(if (createAccount) "Sudah punya akun? Masuk" else "Belum punya akun? Daftar") }
-                    } else {
-                        TextButton(enabled = !model.busy, onClick = {
-                            model.clearError()
-                            showPassword = true
-                        }) { Text("Gunakan email dan kata sandi") }
-                    }
-                    if (linked) {
-                        TextButton(enabled = !model.busy, onClick = {
-                            unlinking = true
-                            pin = ""
-                            password = ""
-                            model.clearError()
-                        }) { Text("Hapus tautan email") }
-                    }
+                    OwnerLinkOption("Gunakan email dan kata sandi", enabled = !model.busy, onClick = {
+                        model.clearError()
+                        showPassword = true
+                    })
                 }
-                ErrorText(model.error)
+                if (linked) {
+                    TextButton(enabled = !model.busy, onClick = {
+                        unlinking = true
+                        pin = ""
+                        password = ""
+                        model.clearError()
+                    }) { Text("Hapus tautan email") }
+                } else {
+                    OwnerLinkOption(
+                        "Lanjutkan sebagai tamu",
+                        onClick = if (onboarding) model::continueAsGuest else dismiss,
+                        enabled = !model.busy
+                    )
+                }
             }
-        },
-        confirmButton = {
-            if (unlinking || showPassword || !model.googleOwnerAvailable) {
-                TextButton(
-                    enabled = !model.busy && (skippable || pin.length == 6) &&
-                        (unlinking || confirmed && if (createAccount) password.length >= 6 else password.isNotEmpty()),
-                    onClick = {
-                        if (unlinking) model.unlinkOwnerEmail(pin, onDismiss)
-                        else model.linkOwnerEmail(pin, email, confirmation, password, createAccount, onDismiss)
-                    }
-                ) { Text(when {
-                    model.busy -> "Memproses…"
-                    unlinking -> "Hapus tautan"
-                    createAccount -> "Daftar"
-                    else -> "Masuk"
-                }) }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = dismiss, enabled = !model.busy) { Text(if (linked) "Batal" else "Lanjutkan sebagai tamu") }
+            ErrorText(model.error)
         }
-    )
+    }
+    val confirm: @Composable () -> Unit = {
+        if (unlinking || showPassword || !model.googleOwnerAvailable) {
+            TextButton(
+                modifier = if (onboarding) Modifier.fillMaxWidth() else Modifier,
+                enabled = !model.busy && (onboarding || pin.length == 6) &&
+                    (unlinking || confirmed && if (createAccount) password.length >= 6 else password.isNotEmpty()),
+                onClick = {
+                    if (unlinking) model.unlinkOwnerEmail(pin, onDismiss)
+                    else model.linkOwnerEmail(pin, email, confirmation, password, createAccount, onDismiss)
+                }
+            ) { Text(when {
+                model.busy -> "Memproses…"
+                unlinking -> "Hapus tautan"
+                createAccount -> "Daftar"
+                else -> "Masuk"
+            }) }
+        }
+    }
+    if (onboarding) {
+        Column(
+            Modifier.fillMaxSize().safeDrawingPadding().imePadding().verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            StoreLogo("", Modifier.size(50.dp))
+            Header("KASIR UNTUK TOKO ANDA", "Selamat datang di Kasir Rapi", "Pilih cara masuk sebelum membuat PIN pemilik.")
+            options()
+            confirm()
+        }
+    } else {
+        AlertDialog(
+            onDismissRequest = dismiss,
+            title = { Text(when {
+                unlinking -> "Hapus tautan email pemilik"
+                linked -> "Ubah email pemilik"
+                else -> "Hubungkan email pemilik"
+            }) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { options() } },
+            confirmButton = confirm,
+            dismissButton = if (linked) {
+                { TextButton(onClick = dismiss, enabled = !model.busy) { Text("Batal") } }
+            } else null
+        )
+    }
+}
+
+@Composable
+private fun OwnerLinkOption(label: String, onClick: () -> Unit, enabled: Boolean, google: Boolean = false) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+        colors = if (google) {
+            ButtonDefaults.outlinedButtonColors(containerColor = Color.White, contentColor = Color(0xFF1F1F1F))
+        } else ButtonDefaults.outlinedButtonColors(),
+        border = if (google && enabled) BorderStroke(1.dp, Color(0xFF747775))
+            else ButtonDefaults.outlinedButtonBorder(enabled)
+    ) {
+        if (google) {
+            Image(
+                painterResource(R.drawable.ic_google_g),
+                contentDescription = null,
+                modifier = Modifier.padding(end = 8.dp).size(20.dp),
+                alpha = if (enabled) 1f else 0.38f
+            )
+        }
+        Text(label)
+    }
 }
 
 @Composable
