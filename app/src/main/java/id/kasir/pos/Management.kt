@@ -541,7 +541,6 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Header("04  /  PENGATURAN", "Profil toko", "Identitas ini muncul di struk transaksi baru.")
-        CashierProfilesSettings(model)
         StaticQrisSettings(model, onEdit = { saved = false })
         Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
             Row(Modifier.fillMaxWidth().padding(13.dp), verticalAlignment = Alignment.CenterVertically,
@@ -612,6 +611,7 @@ internal fun SettingsScreen(model: RegisterModel, onLinkOwner: () -> Unit) {
                 Text(if (email == null) "Hubungkan email pemilik" else "Kelola email pemilik")
             }
         }
+        OwnerCashierSettings(model)
         CloudBackupSettings(model)
         OutlinedButton(onClick = model::lock, enabled = !model.busy, modifier = Modifier.fillMaxWidth()) { Text("Kunci aplikasi") }
         Spacer(Modifier.height(8.dp))
