@@ -62,13 +62,15 @@ class ThermalReceiptTest {
         val pixels = IntArray(9) { 0xFFFFFFFF.toInt() }
         pixels[0] = 0xFF000000.toInt()
         pixels[1] = 0x00000000
+        pixels[2] = 0xFF999999.toInt()
         pixels[8] = 0xFF000000.toInt()
         val logo = thermalRaster(9, 1, pixels)
-        assertArrayEquals(byteArrayOf(0x1D, 0x76, 0x30, 0, 2, 0, 1, 0, 0x80.toByte(), 0x80.toByte()), logo)
+        assertArrayEquals(byteArrayOf(0x1D, 0x76, 0x30, 0, 2, 0, 1, 0, 0xA0.toByte(), 0x80.toByte()), logo)
         val output = thermalReceipt(receipt, ThermalPaper.MM58, logo)
         val header = "\u001B@\u001Ba\u0001".toByteArray(Charsets.US_ASCII)
-        assertArrayEquals(header + logo + "Toko Cafe\n".toByteArray(Charsets.US_ASCII),
-            output.copyOfRange(0, header.size + logo.size + "Toko Cafe\n".length))
+        val address = "Jalan Uji No. 1\n".toByteArray(Charsets.US_ASCII)
+        assertArrayEquals(header + logo + address, output.copyOfRange(0, header.size + logo.size + address.size))
+        assertFalse(output.toString(Charsets.US_ASCII).contains("Toko Cafe"))
     }
 
     @Test fun includesCashierSnapshotOnTextAndPrintedReceiptsButNotLegacyReceipts() {

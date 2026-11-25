@@ -7,12 +7,12 @@ internal sealed interface ReceiptEntry {
     data class Row(val label: String, val amount: String? = null, val style: ReceiptStyle) : ReceiptEntry
 }
 
-internal fun Receipt.entries(): List<ReceiptEntry> = buildList {
+internal fun Receipt.entries(showStoreName: Boolean): List<ReceiptEntry> = buildList {
     fun row(label: String, style: ReceiptStyle, amount: Long? = null) {
         if (label.isNotBlank()) add(ReceiptEntry.Row(label, amount?.let(::rupiah), style))
     }
 
-    row(sale.storeName, ReceiptStyle.STORE)
+    if (showStoreName) row(sale.storeName, ReceiptStyle.STORE)
     row(sale.storeAddress, ReceiptStyle.ADDRESS)
     row("Tanggal: ${dateLabel(sale.time)}", ReceiptStyle.METADATA)
     if (sale.id > 0) row(ticket(sale.id), ReceiptStyle.METADATA)

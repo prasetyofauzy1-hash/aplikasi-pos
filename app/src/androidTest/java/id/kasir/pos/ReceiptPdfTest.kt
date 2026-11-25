@@ -12,6 +12,20 @@ import java.io.File
 import java.util.UUID
 
 class ReceiptPdfTest {
+    @Test fun blankAndMissingCustomLogoUseTheBundledArtwork() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val logo = checkNotNull(loadReceiptLogo(context, ""))
+        val fallback = checkNotNull(loadReceiptLogo(context, "missing-logo.png"))
+        try {
+            assertTrue(logo.sameAs(fallback))
+            assertTrue(logo.width > 300 && logo.height > 300)
+            assertTrue(logo.getPixel(logo.width / 2, logo.height / 2) != Color.TRANSPARENT)
+        } finally {
+            logo.recycle()
+            fallback.recycle()
+        }
+    }
+
     @Test fun sharesReadablePaginatedPdfWithLogo() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val logoFile = File(context.filesDir, "receipt-test-${UUID.randomUUID()}.png")

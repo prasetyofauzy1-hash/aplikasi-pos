@@ -465,7 +465,7 @@ internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout:
     val sale = receipt.sale
     val context = LocalContext.current
     val logo = remember(context, sale.logoName) { loadReceiptLogo(context, sale.logoName)?.asImageBitmap() }
-    val entries = remember(receipt) { receipt.entries() }
+    val entries = remember(receipt, logo) { receipt.entries(showStoreName = logo == null) }
     Column(
         Modifier.fillMaxSize().navigationBarsPadding().padding(horizontal = 20.dp).verticalContent(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -475,7 +475,7 @@ internal fun ReceiptScreen(receipt: Receipt, model: RegisterModel, fromCheckout:
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 if (logo != null) {
                     Image(logo, contentDescription = "Logo toko",
-                        modifier = Modifier.align(Alignment.CenterHorizontally).size(width = 156.dp, height = 104.dp),
+                        modifier = Modifier.align(Alignment.CenterHorizontally).size(width = 156.dp, height = 132.dp),
                         contentScale = ContentScale.Fit)
                 }
                 entries.forEach { entry ->

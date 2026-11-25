@@ -37,7 +37,7 @@ internal fun writeReceiptPdf(context: Context, receipt: Receipt): Uri {
     try {
         val document = PdfDocument()
         try {
-            drawReceiptPdf(document, receipt.entries(), logo)
+            drawReceiptPdf(document, receipt.entries(showStoreName = logo == null), logo)
             file.outputStream().use(document::writeTo)
         } finally {
             document.close()
@@ -61,7 +61,7 @@ private fun drawReceiptPdf(document: PdfDocument, entries: List<ReceiptEntry>, l
     }
     val blocks = buildList {
         if (logo != null) {
-            val (width, height) = logo.fittedSize(136, 90)
+            val (width, height) = logo.fittedSize(136, 116)
             val left = (contentWidth - width) / 2
             val paint = Paint(Paint.FILTER_BITMAP_FLAG)
             add(PdfReceiptBlock(height + 5) { drawBitmap(logo, null, Rect(left, 0, left + width, height), paint) })

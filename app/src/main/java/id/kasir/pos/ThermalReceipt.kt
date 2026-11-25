@@ -3,9 +3,9 @@ package id.kasir.pos
 import java.io.ByteArrayOutputStream
 import java.text.Normalizer
 
-internal enum class ThermalPaper(val label: String, val columns: Int, val logoWidth: Int) {
-    MM58("58 mm", 32, 192),
-    MM80("80 mm", 48, 256)
+internal enum class ThermalPaper(val label: String, val columns: Int, val logoWidth: Int, val logoHeight: Int) {
+    MM58("58 mm", 32, 192, 212),
+    MM80("80 mm", 48, 216, 235)
 }
 
 private val combiningMarks = Regex("\\p{M}+")
@@ -34,7 +34,7 @@ internal fun thermalReceipt(receipt: Receipt, paper: ThermalPaper, logo: ByteArr
         alignCenter()
         if (logo != null) raster(logo)
         var centered = true
-        receipt.entries().forEach { entry ->
+        receipt.entries(showStoreName = logo == null).forEach { entry ->
             when (entry) {
                 ReceiptEntry.Rule -> divider()
                 is ReceiptEntry.Row -> {
@@ -59,7 +59,7 @@ internal fun thermalRaster(width: Int, height: Int, pixels: IntArray): ByteArray
             val argb = pixels[y * width + x]
             val alpha = argb ushr 24
             val gray = ((argb shr 16 and 255) * 30 + (argb shr 8 and 255) * 59 + (argb and 255) * 11) / 100
-            if ((255 - gray) * alpha > 127 * 255) {
+            if ((255 - gray) * alpha > 90 * 255) {
                 val index = 8 + y * stride + x / 8
                 data[index] = (data[index].toInt() or (0x80 shr (x % 8))).toByte()
             }

@@ -6,8 +6,12 @@ import android.graphics.BitmapFactory
 import java.io.File
 import kotlin.math.roundToInt
 
-internal fun loadReceiptLogo(context: Context, logoName: String): Bitmap? =
-    if (logoName.isBlank()) null else BitmapFactory.decodeFile(File(context.filesDir, logoName).path)
+internal fun loadReceiptLogo(context: Context, logoName: String): Bitmap? {
+    val custom = logoName.takeIf { it.isNotBlank() }?.let {
+        BitmapFactory.decodeFile(File(context.filesDir, it).path)
+    }
+    return custom ?: BitmapFactory.decodeResource(context.resources, R.drawable.jusgo_receipt_logo)
+}
 
 internal fun Bitmap.fittedSize(maxWidth: Int, maxHeight: Int): Pair<Int, Int> {
     val scale = minOf(maxWidth.toFloat() / width, maxHeight.toFloat() / height)
@@ -16,7 +20,7 @@ internal fun Bitmap.fittedSize(maxWidth: Int, maxHeight: Int): Pair<Int, Int> {
 
 internal fun receiptPrinterLogo(context: Context, logoName: String, paper: ThermalPaper): ByteArray? {
     val original = loadReceiptLogo(context, logoName) ?: return null
-    val (width, height) = original.fittedSize(paper.logoWidth, 160)
+    val (width, height) = original.fittedSize(paper.logoWidth, paper.logoHeight)
     val bitmap = Bitmap.createScaledBitmap(original, width, height, true)
     try {
         val pixels = IntArray(width * height)
