@@ -1,5 +1,6 @@
 package id.kasir.pos
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -10,7 +11,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -41,36 +47,33 @@ internal fun CashierProfilePicker(model: RegisterModel) {
 }
 
 @Composable
-internal fun CashierProfilesSettings(model: RegisterModel) {
+internal fun OwnerCashierSettings(model: RegisterModel) {
     val profiles by model.cashiers.collectAsStateWithLifecycle()
-    var showProfiles by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
     val id = editingId
     val edited = profiles.firstOrNull { it.id == id }
-    OutlinedButton(
-        onClick = { model.clearError(); showProfiles = true },
-        enabled = !model.busy,
-        modifier = Modifier.fillMaxWidth()
-    ) { Text("Kelola profil kasir") }
-    if (showProfiles) {
-        if (id != null && (id == 0L || edited != null)) {
-            CashierProfileEditor(model, id, edited?.name.orEmpty()) {
-                model.clearError()
-                editingId = null
+    EmptyPanel("Kasir akun pemilik", "Tambah kasir agar namanya tercatat di setiap struk. Perubahan memerlukan PIN pemilik.")
+    profiles.forEach { profile ->
+        Surface(color = Color.White, shape = Shape, border = BorderStroke(1.dp, Line)) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(profile.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(if (profile.id == OWNER_CASHIER_ID) "Pemilik" else "Kasir", color = Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                TextButton(onClick = { model.clearError(); editingId = profile.id }, enabled = !model.busy,
+                    modifier = Modifier.semantics { contentDescription = "Edit ${profile.name}" }) { Text("Edit") }
             }
-        } else {
-            AlertDialog(
-                onDismissRequest = { showProfiles = false; editingId = null },
-                title = { Text("Profil kasir") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Pilih profil untuk diedit. Perubahan memerlukan PIN pemilik.")
-                        CashierProfileList(profiles, selectedId = null) { editingId = it }
-                    }
-                },
-                confirmButton = { TextButton(onClick = { editingId = 0L }) { Text("Tambah pegawai") } },
-                dismissButton = { TextButton(onClick = { showProfiles = false; editingId = null }) { Text("Tutup") } }
-            )
+        }
+    }
+    Button(
+        onClick = { model.clearError(); editingId = 0L },
+        enabled = !model.busy,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+    ) { Text("Tambah kasir") }
+    if (id != null && (id == 0L || edited != null)) {
+        CashierProfileEditor(model, id, edited?.name.orEmpty()) {
+            model.clearError()
+            editingId = null
         }
     }
 }
@@ -81,7 +84,7 @@ private fun CashierProfileList(profiles: List<CashierProfile>, selectedId: Long?
         items(profiles, key = { it.id }) { profile ->
             ListItem(
                 headlineContent = { Text(profile.name) },
-                supportingContent = { Text(if (profile.id == OWNER_CASHIER_ID) "Pemilik" else "Pegawai") },
+                supportingContent = { Text(if (profile.id == OWNER_CASHIER_ID) "Pemilik" else "Kasir") },
                 trailingContent = if (selectedId == profile.id) ({ Text("Aktif", color = Pine) }) else null,
                 modifier = Modifier.clickable { onSelect(profile.id) }
             )
@@ -104,10 +107,10 @@ private fun CashierProfileEditor(model: RegisterModel, id: Long, initialName: St
         onDismissRequest = { if (!model.busy) onClose() },
         title = {
             Text(when {
-                deleting -> "Hapus pegawai?"
-                id == 0L -> "Tambah pegawai"
+                deleting -> "Hapus kasir?"
+                id == 0L -> "Tambah kasir"
                 id == OWNER_CASHIER_ID -> "Edit profil pemilik"
-                else -> "Edit pegawai"
+                else -> "Edit kasir"
             })
         },
         text = {
@@ -117,7 +120,7 @@ private fun CashierProfileEditor(model: RegisterModel, id: Long, initialName: St
                 } else {
                     OutlinedTextField(
                         name, { name = it.take(60); model.clearError() }, Modifier.fillMaxWidth(),
-                        label = { Text("Nama") }, singleLine = true, enabled = !model.busy
+                        label = { Text("Nama kasir") }, singleLine = true, enabled = !model.busy
                     )
                 }
                 PinInput(pin, "PIN pemilik", !model.busy, model.error != null, ImeAction.Done,
@@ -125,7 +128,7 @@ private fun CashierProfileEditor(model: RegisterModel, id: Long, initialName: St
                 ErrorText(model.error)
                 if (id != 0L && id != OWNER_CASHIER_ID && !deleting) {
                     TextButton(onClick = { deleting = true; pin = ""; model.clearError() }, enabled = !model.busy) {
-                        Text("Hapus pegawai", color = MaterialTheme.colorScheme.error)
+                        Text("Hapus kasir", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
