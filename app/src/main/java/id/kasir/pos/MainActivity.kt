@@ -75,7 +75,11 @@ class MainActivity : ComponentActivity() {
                 surfaceContainer = Paper
             )) {
                 Surface(Modifier.fillMaxSize(), color = Paper) {
-                    if (model.unlocked) RegisterApp(model, window) else UnlockScreen(model)
+                    when {
+                        model.unlocked -> RegisterApp(model, window)
+                        model.needsOwnerOnboarding -> OwnerEmailLink(model, onboarding = true)
+                        else -> UnlockScreen(model)
+                    }
                 }
             }
         }
@@ -115,9 +119,7 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
         if (protectWindow) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { if (protectWindow) window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
-    var showEmailLink by rememberSaveable {
-        mutableStateOf(model.initialOwnerEmailOffer)
-    }
+    var showEmailLink by rememberSaveable { mutableStateOf(false) }
     var orderScreen by rememberSaveable { mutableStateOf("") }
     var cashierQuery by rememberSaveable { mutableStateOf("") }
     var editingId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -229,7 +231,6 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
                     tab == Tab.HISTORY -> tabState.SaveableStateProvider(Tab.HISTORY.name) { HistoryScreen(model) }
                     tab == Tab.PROFIT -> if (model.profitUnlocked) ProfitScreen(menu, ingredients, model) else ProfitGate(model)
                     tab == Tab.SETTINGS -> SettingsScreen(model, onLinkOwner = {
-                        model.dismissInitialOwnerEmailOffer()
                         model.clearError()
                         showEmailLink = true
                     })
@@ -238,8 +239,7 @@ private fun RegisterApp(model: RegisterModel, window: Window) {
         }
     }
     if (showEmailLink) {
-        LinkOwnerEmailDialog(model) {
-            model.dismissInitialOwnerEmailOffer()
+        OwnerEmailLink(model) {
             model.clearError()
             showEmailLink = false
         }
