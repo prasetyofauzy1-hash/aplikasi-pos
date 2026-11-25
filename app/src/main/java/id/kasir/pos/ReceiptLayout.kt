@@ -4,12 +4,17 @@ internal enum class ReceiptStyle { STORE, ADDRESS, METADATA, ITEM, DETAIL, TOTAL
 
 internal sealed interface ReceiptEntry {
     data object Rule : ReceiptEntry
-    data class Row(val label: String, val amount: String? = null, val style: ReceiptStyle) : ReceiptEntry
+    data class Row(
+        val label: String,
+        val amount: String? = null,
+        val style: ReceiptStyle,
+        val keepWithNext: Boolean = false
+    ) : ReceiptEntry
 }
 
 internal fun Receipt.entries(showStoreName: Boolean): List<ReceiptEntry> = buildList {
-    fun row(label: String, style: ReceiptStyle, amount: Long? = null) {
-        if (label.isNotBlank()) add(ReceiptEntry.Row(label, amount?.let(::rupiah), style))
+    fun row(label: String, style: ReceiptStyle, amount: Long? = null, keepWithNext: Boolean = false) {
+        if (label.isNotBlank()) add(ReceiptEntry.Row(label, amount?.let(::rupiah), style, keepWithNext))
     }
 
     if (showStoreName) row(sale.storeName, ReceiptStyle.STORE)
@@ -19,10 +24,14 @@ internal fun Receipt.entries(showStoreName: Boolean): List<ReceiptEntry> = build
     sale.cashierLabel?.let { row(it, ReceiptStyle.METADATA) }
     add(ReceiptEntry.Rule)
     lines.forEach { item ->
-        row(item.productName, ReceiptStyle.ITEM)
+        val details = item.detailLines()
+        row(item.productName, ReceiptStyle.ITEM, keepWithNext = true)
         val unitPrice = item.unitPrice + item.discount
-        row("${item.quantity} x ${rupiah(unitPrice)}", ReceiptStyle.DETAIL, item.quantity * unitPrice)
-        item.detailLines().forEach { row(it, ReceiptStyle.DETAIL) }
+        row("${item.quantity} x ${rupiah(unitPrice)}", ReceiptStyle.DETAIL, item.quantity * unitPrice,
+            keepWithNext = details.isNotEmpty())
+        details.forEachIndexed { index, detail ->
+            row(detail, ReceiptStyle.DETAIL, keepWithNext = index < details.lastIndex)
+        }
     }
     add(ReceiptEntry.Rule)
     if (hasAdjustments) row("Subtotal", ReceiptStyle.DETAIL, sale.subtotal)

@@ -62,9 +62,20 @@ internal fun paginateReceiptPdf(blocks: List<PdfReceiptBlock>): List<List<PdfRec
     var available = capacity
     var start = 0
     blocks.forEachIndexed { index, block ->
-        val followingHeight = if (block.keepWithNext) blocks.getOrNull(index + 1)?.height ?: 0 else 0
-        val groupHeight = block.height + followingHeight
-        val required = if (groupHeight <= capacity) groupHeight else block.height
+        var required = block.height
+        if (block.keepWithNext && (index == 0 || !blocks[index - 1].keepWithNext)) {
+            var last = index
+            var groupHeight = block.height
+            while (last < blocks.lastIndex && blocks[last].keepWithNext) {
+                groupHeight += blocks[++last].height
+            }
+            val firstPairHeight = block.height + (blocks.getOrNull(index + 1)?.height ?: 0)
+            required = when {
+                groupHeight <= capacity -> groupHeight
+                firstPairHeight <= capacity -> firstPairHeight
+                else -> block.height
+            }
+        }
         if (required > available && index > start) {
             add(blocks.subList(start, index))
             start = index
@@ -127,16 +138,14 @@ private fun pdfReceiptRow(row: ReceiptEntry.Row): List<PdfReceiptBlock> {
     val amount = row.amount
     val amountWidth = if (amount == null) 0 else kotlin.math.ceil(text.measureText(amount)).toInt()
     val centered = row.style == ReceiptStyle.STORE || row.style == ReceiptStyle.ADDRESS
-    // The receipt layout emits the quantity and price immediately after the item name.
-    val isItemName = row.style == ReceiptStyle.ITEM
-    val rowTop = if (isItemName) 4 else 0
+    val rowTop = if (row.style == ReceiptStyle.ITEM) 4 else 0
     val availableWidth = if (amount == null) contentWidth else contentWidth - amountWidth - 8
     val layout = StaticLayout.Builder.obtain(row.label, 0, row.label.length, text, availableWidth)
         .setIncludePad(false)
         .setAlignment(if (centered) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL)
         .build()
     if (layout.height + rowTop + 3 <= maxPageHeight - 2 * padding) {
-        return listOf(PdfReceiptBlock(layout.height + rowTop + 3, keepWithNext = isItemName) {
+        return listOf(PdfReceiptBlock(layout.height + rowTop + 3, keepWithNext = row.keepWithNext) {
             translate(0f, rowTop.toFloat())
             layout.draw(this)
             if (amount != null) drawText(amount, (contentWidth - amountWidth).toFloat(), layout.getLineBaseline(0).toFloat(), text)
@@ -145,7 +154,7 @@ private fun pdfReceiptRow(row: ReceiptEntry.Row): List<PdfReceiptBlock> {
     return List(layout.lineCount) { line ->
         val top = layout.getLineTop(line)
         val lineHeight = layout.getLineBottom(line) - top
-        PdfReceiptBlock(lineHeight, keepWithNext = isItemName && line == layout.lineCount - 1) {
+        PdfReceiptBlock(lineHeight, keepWithNext = line < layout.lineCount - 1 || row.keepWithNext) {
             clipRect(0, 0, contentWidth, lineHeight)
             translate(0f, -top.toFloat())
             layout.draw(this)
