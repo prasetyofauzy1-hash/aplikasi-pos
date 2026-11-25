@@ -1,4 +1,4 @@
-# Kasir Rapi
+# HappyPOS
 
 Aplikasi kasir Android berbahasa Indonesia untuk satu toko dan satu perangkat, tanpa memerlukan koneksi internet.
 

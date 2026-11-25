@@ -24,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -121,7 +122,8 @@ internal fun OwnerEmailLink(model: RegisterModel, onboarding: Boolean = false, o
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             StoreLogo("", Modifier.size(50.dp))
-            Header("KASIR UNTUK TOKO ANDA", "Selamat datang di Kasir Rapi", "Pilih cara masuk sebelum membuat PIN pemilik.")
+            Header("KASIR UNTUK TOKO ANDA", stringResource(R.string.owner_welcome, stringResource(R.string.app_name)),
+                "Pilih cara masuk sebelum membuat PIN pemilik.")
             options()
             confirm()
         }
@@ -184,8 +186,7 @@ internal fun RecoverOwnerPinDialog(model: RegisterModel, onDismiss: () -> Unit) 
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (email != null) {
-                        Text("Akun pemilik sudah terhubung, tetapi versi ini tidak mendukung metode login tersebut. " +
-                            "Perbarui Kasir Rapi tanpa menghapus aplikasi. Data toko tetap tersimpan.")
+                        Text(stringResource(R.string.owner_recovery_update, stringResource(R.string.app_name)))
                     } else {
                         Text("Tidak ada email pemilik yang terhubung, sehingga PIN tidak dapat dipulihkan.")
                     }

@@ -1,5 +1,7 @@
 <resources>
-    <string name="app_name">Kasir Rapi</string>
+    <string name="app_name">HappyPOS</string>
+    <string name="owner_welcome">Selamat datang di %1$s</string>
+    <string name="owner_recovery_update">Akun pemilik sudah terhubung, tetapi versi ini tidak mendukung metode login tersebut. Perbarui %1$s tanpa menghapus aplikasi. Data toko tetap tersimpan.</string>
     <style name="Theme.KasirRapi" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">#F7F8F2</item>
