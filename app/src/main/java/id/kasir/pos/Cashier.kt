@@ -150,6 +150,7 @@ private fun OrderOptionsDialog(product: Product, onDismiss: () -> Unit, onAdd: (
     val options = parseProductOptions(product.options)
     var selected by rememberSaveable { mutableStateOf(listOf<String>()) }
     var note by rememberSaveable { mutableStateOf("") }
+    var quick by rememberSaveable { mutableStateOf(listOf<String>()) }
     val price = product.price - product.promoPerUnit + options.filter { it.name in selected }.sumOf { it.extraPrice }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -166,13 +167,23 @@ private fun OrderOptionsDialog(product: Product, onDismiss: () -> Unit, onAdd: (
                         }
                     }
                 }
-                OutlinedTextField(note, { note = cleanOptionText(it, 80) }, Modifier.fillMaxWidth(),
-                    label = { Text("Catatan pesanan") }, placeholder = { Text("Mis. less sugar, tanpa es") }, singleLine = true)
+                Text("Catatan pesanan", fontWeight = FontWeight.Bold)
+                quickNoteGroups.forEach { group ->
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        group.forEach { choice ->
+                            FilterChip(selected = choice in quick, onClick = { quick = toggleQuickNote(quick, choice) },
+                                label = { Text(choice) })
+                        }
+                    }
+                }
+                val noteRoom = MAX_ORDER_NOTE - composeOrderNote(quick, "").let { if (it.isEmpty()) 0 else it.length + 2 }
+                OutlinedTextField(note.take(noteRoom), { note = cleanOptionText(it, noteRoom) }, Modifier.fillMaxWidth(),
+                    label = { Text("Catatan lain") }, placeholder = { Text("Mis. pisah gelas") }, singleLine = true)
                 Text("${rupiah(price)} per barang", color = Pine, fontWeight = FontWeight.Bold)
             }
         },
         confirmButton = {
-            TextButton(onClick = { onAdd(options.map { it.name }.filter { it in selected }, note) }, enabled = product.stock > 0) {
+            TextButton(onClick = { onAdd(options.map { it.name }.filter { it in selected }, composeOrderNote(quick, note)) }, enabled = product.stock > 0) {
                 Text("Tambah ke keranjang")
             }
         },
