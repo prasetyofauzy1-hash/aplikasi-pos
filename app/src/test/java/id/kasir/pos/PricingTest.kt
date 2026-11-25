@@ -89,4 +89,16 @@ class PricingTest {
         val printedInjected = thermalReceipt(injected, ThermalPaper.MM58).toString(Charsets.US_ASCII)
         assertTrue(printedInjected, printedInjected.contains("Biaya?X"))
     }
+
+    @Test fun quickOrderNotesPickOnePerGroupAndJoinTheFreeText() {
+        var quick = toggleQuickNote(emptyList(), "Tanpa es")
+        quick = toggleQuickNote(quick, "Less sugar")
+        quick = toggleQuickNote(quick, "Extra es")
+        quick = toggleQuickNote(quick, "Air normal")
+        assertEquals(listOf("Less sugar", "Extra es", "Air normal"), quick)
+        assertEquals(listOf("Less sugar", "Air normal"), toggleQuickNote(quick, "Extra es"))
+        assertEquals("Less sugar, Extra es, Air normal, pisah gelas", composeOrderNote(quick, " pisah gelas "))
+        assertEquals("", composeOrderNote(emptyList(), "  "))
+        assertEquals(MAX_ORDER_NOTE, composeOrderNote(quick, "x".repeat(200)).length)
+    }
 }

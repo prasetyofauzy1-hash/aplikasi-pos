@@ -10,6 +10,23 @@ data class ProductOption(val name: String, val extraPrice: Long)
 internal fun cleanOptionText(text: String, limit: Int): String =
     text.replace(Regex("[\\t\\r\\n]+"), " ").take(limit)
 
+internal const val MAX_ORDER_NOTE = 80
+
+internal val quickNoteGroups = listOf(
+    listOf("Less sugar", "No sugar"),
+    listOf("Extra es", "Es normal", "Tanpa es"),
+    listOf("Extra air", "Air normal"),
+)
+
+internal fun toggleQuickNote(selected: List<String>, choice: String): List<String> {
+    if (choice in selected) return selected - choice
+    val group = quickNoteGroups.firstOrNull { choice in it } ?: return selected
+    return quickNoteGroups.flatten().filter { it == choice || (it in selected && it !in group) }
+}
+
+internal fun composeOrderNote(quick: List<String>, note: String): String =
+    cleanOptionText((quick + note.trim()).filter { it.isNotBlank() }.joinToString(", "), MAX_ORDER_NOTE).trim()
+
 internal fun parseProductOptions(text: String): List<ProductOption> = text.lines().mapNotNull { line ->
     val parts = line.split('\t')
     val name = parts[0].trim()
