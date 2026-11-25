@@ -81,6 +81,49 @@ class OwnerAuthTest {
         }
     }
 
+    @Test fun exchangesGoogleIdTokenForFirebaseSessionAndCreatesAnAccountOnlyWhenLinking() {
+        withServer { auth, server ->
+            for (create in listOf(true, false)) {
+                server.enqueue(MockResponse().setBody("""{"localId":"google-owner","email":"owner@example.com","idToken":"firebase-token"}"""))
+                val session = auth.googleSession("google+token&=", createAccount = create)
+                assertEquals(OwnerAccount("google-owner", "owner@example.com"), session.account)
+                assertEquals("firebase-token", session.idToken)
+                assertFalse(session.account.matches("another-owner"))
+                val request = server.next()
+                val body = JSONObject(request.body.readUtf8())
+                assertEquals("POST", request.method)
+                assertEquals("/v1/accounts:signInWithIdp?key=test-key", request.path)
+                assertEquals("id_token=google%2Btoken%26%3D&providerId=google.com", body.getString("postBody"))
+                assertEquals("http://localhost", body.getString("requestUri"))
+                assertTrue(body.getBoolean("returnSecureToken"))
+                assertEquals(create, body.getBoolean("autoCreate"))
+            }
+        }
+    }
+
+    @Test fun describesGoogleCredentialAndProviderConfigurationFailuresInIndonesian() {
+        assertTrue(googleCredentialError(false, "16: DEVELOPER_ERROR").contains("belum dikonfigurasi"))
+        assertTrue(googleCredentialError(true, "").contains("mungkin belum terdaftar"))
+        assertTrue(googleCredentialError(false, "unexpected").contains("Periksa koneksi internet"))
+        withServer { auth, server ->
+            server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":{"message":"OPERATION_NOT_ALLOWED"}}"""))
+            val error = assertThrows(OwnerAuthException::class.java) {
+                auth.googleSession("test-token", createAccount = true)
+            }
+            assertTrue(error.message.orEmpty().contains("Login Google belum diaktifkan"))
+        }
+    }
+
+    @Test fun rejectsGoogleResponsesThatRequireConfirmationWithAnExistingProvider() {
+        withServer { auth, server ->
+            server.enqueue(MockResponse().setBody("""{"needConfirmation":true,"email":"owner@example.com"}"""))
+            val error = assertThrows(OwnerAuthException::class.java) {
+                auth.googleSession("test-token", createAccount = true)
+            }
+            assertTrue(error.message.orEmpty().contains("sudah terhubung dengan metode lain"))
+        }
+    }
+
     private fun MockWebServer.next(): RecordedRequest = checkNotNull(takeRequest(2, TimeUnit.SECONDS))
 
     private fun withServer(test: (OwnerAuth, MockWebServer) -> Unit) {

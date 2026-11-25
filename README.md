@@ -38,12 +38,14 @@ APK debug bisa dipasang di Android 7.0 (API 24) atau lebih baru. Pembaruan mempe
 2. Di **Authentication → Sign-in method**, aktifkan **Email/Password**.
 3. Salin **Web API Key** dari **Project settings → General**, tambah `FIREBASE_API_KEY=...` ke `local.properties` di akar repo, lalu build ulang. Gunakan proyek Firebase yang sama untuk pembaruan aplikasi.
 
-Tanpa pengaturan ini, opsi menghubungkan email tidak muncul dan aplikasi tetap bisa digunakan sepenuhnya offline. Pemulihan PIN tanpa akun yang sudah dihubungkan tidak tersedia.
+Untuk **Masuk dengan Google**, aktifkan **Google** di **Authentication → Sign-in method**. Di **Project settings → General**, daftarkan aplikasi Android `id.kasir.pos` dan tambahkan SHA-1 sertifikat yang menandatangani APK. Build memakai ID klien OAuth web proyek Jus.go; untuk proyek lain, atur `GOOGLE_WEB_CLIENT_ID` di `local.properties` atau environment build.
+
+Pilih **Lanjutkan sebagai tamu** untuk menyimpan data toko hanya di perangkat ini. Tanpa `FIREBASE_API_KEY`, opsi menghubungkan email tidak muncul dan aplikasi tetap bisa digunakan sepenuhnya offline. Pemulihan PIN dan backup cloud memerlukan akun yang sudah dihubungkan.
 
 ### Backup cloud (opsional)
 
 - Buka **Toko → Backup cloud** setelah menghubungkan email pemilik. **Cadangkan ke cloud** menyimpan satu salinan terbaru per akun, menggantikan salinan sebelumnya. Backup tidak otomatis; data baru hanya masuk cloud jika Anda mencadangkan lagi.
-- Di perangkat pengganti, buat PIN baru dan pilih **Sudah punya akun? Masuk** untuk menautkan akun pemilik yang sama. Pilih **Pulihkan dari cloud**. Pemulihan mengganti data toko setempat, bukan menggabungkannya. Jualan tetap bisa dilakukan offline.
+- Di perangkat pengganti, buat PIN baru dan pilih **Masuk dengan Google** atau **Gunakan email dan kata sandi → Sudah punya akun? Masuk** untuk menautkan akun pemilik yang sama. Pilih **Pulihkan dari cloud**. Pemulihan mengganti data toko setempat, bukan menggabungkannya. Jualan tetap bisa dilakukan offline.
 - Salinan mencakup produk, resep, stok, riwayat opname, transaksi, shift kasir, aturan biaya tambahan, profil dan logo toko, gambar QRIS, dan profil kasir. PIN, tautan login, kasir yang sedang aktif, setelan printer, dan keranjang yang belum dibayar tidak ikut dicadangkan. Menghapus aplikasi atau melepas tautan email tidak menghapus salinan cloud.
 
 **Aktivasi Firebase.** Di proyek yang sama dengan Authentication, buka **Realtime Database → Create Database** dan pilih **Locked mode**. Publikasikan isi [aturan database](firebase.database.rules.json) di tab **Rules** sebelum mencoba backup. Jangan aktifkan akses publik. Untuk Jus.go, build bawaan memakai database `aplikasi-pos-3d3a7-default-rtdb` di Singapura (`asia-southeast1`). Jika menggunakan database lain, tambahkan `FIREBASE_BACKUP_URL=https://...` sesuai URL di Firebase Console ke `local.properties` atau environment build. Aplikasi membatasi setiap arsip terkompresi hingga 6 MiB agar tetap di bawah batas penulisan; periksa [kuota paket gratis Spark](https://firebase.google.com/pricing).
